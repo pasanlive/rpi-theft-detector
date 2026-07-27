@@ -51,7 +51,7 @@ MODEL_WEIGHTS_PATH = str(MODEL_DIR / "pose_lstm.pth")
 
 # ─── Pipeline Timing ─────────────────────────────────────────────────────────
 INFERENCE_INTERVAL_SEC = 0.1   # 10 Hz BiLSTM polling rate
-DETECTION_CONFIDENCE_MIN = 0.5 # Minimum person detection confidence
+DETECTION_CONFIDENCE_MIN = 0.35 # Minimum person detection confidence
 
 # ─── GStreamer Pipeline Tuning ───────────────────────────────────────────────
 GST_QUEUE_MAX_BUFFERS = 3

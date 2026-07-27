@@ -280,8 +280,12 @@ class IngestionEngine:
             best_detection = None
             best_confidence = 0.0
             for det in detections:
-                if (det.get_label() == "person"
-                        and det.get_confidence() > DETECTION_CONFIDENCE_MIN
+                label = det.get_label().lower() if det.get_label() else ""
+                has_landmarks = len(det.get_objects_typed(hailo.HAILO_LANDMARKS)) > 0
+                is_person_det = (label == "person" or det.get_class_id() == 0 or has_landmarks or not label)
+                
+                if (is_person_det
+                        and det.get_confidence() >= DETECTION_CONFIDENCE_MIN
                         and det.get_confidence() > best_confidence):
                     best_detection = det
                     best_confidence = det.get_confidence()

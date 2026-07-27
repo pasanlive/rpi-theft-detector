@@ -110,10 +110,8 @@ class DashboardBridge:
         keypoints: Optional[list[float]] = None
         if self._thread_bridge is not None:
             try:
-                seq = self._thread_bridge.get_sequence()
-                if seq is not None:
-                    # Take the most recent frame's keypoints
-                    latest = seq[-1]  # shape: (51,)
+                latest = self._thread_bridge.get_latest_frame()
+                if latest is not None:
                     keypoints = latest.tolist()
             except Exception:
                 pass

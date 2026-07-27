@@ -59,6 +59,17 @@ class ThreadBridge:
             
         return np.array(seq_list, dtype=np.float32)
 
+    def get_latest_frame(self) -> Optional[np.ndarray]:
+        """
+        Retrieves the most recent feature vector pushed to the bridge.
+
+        Returns:
+            Optional[np.ndarray]: Vector of shape [FEATURE_DIM] if available, else None.
+        """
+        if len(self._deque) > 0:
+            return self._deque[-1]
+        return None
+
     def is_ready(self) -> bool:
         """
         Checks if the bridge has enough frames for inference.
