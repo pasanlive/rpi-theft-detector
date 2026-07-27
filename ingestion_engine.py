@@ -212,15 +212,16 @@ class IngestionEngine:
             return
 
         caps = pad.query_caps(None)
-        if caps and caps.get_size() > 0:
-            struct_name = caps.get_structure(0).get_name()
-            # Match RTP H.264 video payload caps
-            if "video" in struct_name or "rtp" in struct_name:
-                res = pad.link(sink_pad)
-                if res == Gst.PadLinkReturn.OK:
-                    logger.info("Successfully linked dynamic RTSP video pad to depayloader.")
-                else:
-                    logger.warning("Failed to link RTSP pad: %s", res)
+        caps_str = caps.to_string().lower() if caps is not None else ""
+        logger.debug("RTSP pad added caps: %s", caps_str)
+
+        # Match RTP H.264 video payload caps (e.g. 'application/x-rtp, media=(string)video...')
+        if "video" in caps_str or "h264" in caps_str or "rtp" in caps_str or not caps_str:
+            res = pad.link(sink_pad)
+            if res == Gst.PadLinkReturn.OK:
+                logger.info("Successfully linked dynamic RTSP video pad to depayloader.")
+            else:
+                logger.warning("Failed to link RTSP pad to depayloader: %s", res)
 
     def start(self) -> None:
         """Start the pipeline and enter the GLib main loop.
