@@ -172,7 +172,7 @@ class IngestionEngine:
         logger.info("Using H.264 decoder element: %s", decoder_elem)
 
         pipeline_str = (
-            f"rtspsrc name=src location={self._rtsp_uri} "
+            f'rtspsrc name=src location="{self._rtsp_uri}" '
             f"  latency={GST_RTSP_LATENCY_MS} "
             f"  drop-on-latency=true "
             f"  protocols=tcp "
@@ -200,6 +200,26 @@ class IngestionEngine:
         rtspsrc_elem = self._pipeline.get_by_name("src")
         if rtspsrc_elem is not None:
             rtspsrc_elem.connect("pad-added", self._on_rtspsrc_pad_added)
+            rtspsrc_elem.connect("no-more-pads", self._on_rtspsrc_no_more_pads)
+            logger.info("Connected pad-added signal handler to rtspsrc element '%s'.", rtspsrc_elem.get_name())
+        else:
+            logger.error(
+                "CRITICAL: Could not find 'src' element in pipeline! "
+                "pad-added handler NOT connected — video will NOT work. "
+                "This likely means gst_parse_launch misinterpreted the pipeline string."
+            )
+            # Fallback: iterate all elements and find the rtspsrc by factory name
+            it = self._pipeline.iterate_elements()
+            while True:
+                result, elem = it.next()
+                if result != Gst.IteratorResult.OK:
+                    break
+                factory = elem.get_factory()
+                if factory and factory.get_name() == "rtspsrc":
+                    logger.info("Found rtspsrc by factory scan: '%s'. Connecting pad-added.", elem.get_name())
+                    elem.connect("pad-added", self._on_rtspsrc_pad_added)
+                    elem.connect("no-more-pads", self._on_rtspsrc_no_more_pads)
+                    break
 
         # Connect appsink callback
         appsink = self._pipeline.get_by_name("sink")
@@ -216,6 +236,10 @@ class IngestionEngine:
 
         logger.info("GStreamer pipeline built successfully.")
 
+    def _on_rtspsrc_no_more_pads(self, rtspsrc: Gst.Element) -> None:
+        """Log when rtspsrc has finished creating all dynamic pads."""
+        logger.info("rtspsrc: no-more-pads — all RTSP stream pads have been created.")
+
     def _on_rtspsrc_pad_added(self, rtspsrc: Gst.Element, pad: Gst.Pad) -> None:
         """Dynamically link RTSP video pad to depayloader.
 
@@ -223,30 +247,36 @@ class IngestionEngine:
         This handler selectively links the video pad to the depayloader and
         ignores unhandled tracks (e.g. audio), preventing 'not-linked' errors.
         """
+        caps = pad.query_caps(None)
+        caps_str = caps.to_string().lower() if caps is not None else ""
+        logger.info(">>> rtspsrc pad-added fired! pad=%s caps=%s", pad.get_name(), caps_str[:200])
+
         if self._pipeline is None:
+            logger.warning("pad-added: pipeline is None, skipping.")
             return
         depay = self._pipeline.get_by_name("depay")
         if depay is None:
+            logger.warning("pad-added: could not find 'depay' element, skipping.")
             return
         sink_pad = depay.get_static_pad("sink")
-        if sink_pad is None or sink_pad.is_linked():
+        if sink_pad is None:
+            logger.warning("pad-added: depay has no 'sink' pad.")
             return
-
-        caps = pad.query_caps(None)
-        caps_str = caps.to_string().lower() if caps is not None else ""
-        logger.info("RTSP stream pad added: %s", caps_str)
+        if sink_pad.is_linked():
+            logger.info("pad-added: depay sink already linked, ignoring pad '%s'.", pad.get_name())
+            return
 
         # Ignore audio tracks
         if "audio" in caps_str:
-            logger.info("Ignoring audio stream pad: %s", caps_str)
+            logger.info("Ignoring audio stream pad: %s", caps_str[:200])
             return
 
         # Link video stream pad to depayloader
         try:
             pad.link(sink_pad)
-            logger.info("Successfully linked RTSP video stream to depayloader.")
+            logger.info("Successfully linked RTSP video stream pad '%s' to depayloader.", pad.get_name())
         except Exception as exc:
-            logger.warning("Could not link RTSP pad (%s): %s", caps_str, exc)
+            logger.warning("Could not link RTSP pad '%s' (%s): %s", pad.get_name(), caps_str[:200], exc)
 
     def start(self) -> None:
         """Start the pipeline and enter the GLib main loop.
