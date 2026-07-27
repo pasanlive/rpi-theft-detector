@@ -133,8 +133,9 @@ class IngestionEngine:
 
         Gst.init(None)
         logger.info(
-            "IngestionEngine initialized — RTSP=%s, HEF=%s",
+            "IngestionEngine initialized — RTSP=%s, HEF=%s, CV2=%s, dashboard=%s",
             self._rtsp_uri, self._hef_path,
+            CV2_AVAILABLE, self._dash_bridge is not None,
         )
 
     def build_pipeline(self) -> None:
@@ -321,6 +322,11 @@ class IngestionEngine:
         buffer = sample.get_buffer()
         if buffer is None:
             return Gst.FlowReturn.OK
+
+        # Log first frame arrival to confirm pipeline data flow
+        if self._sample_counter == 0:
+            logger.info(">>> FIRST FRAME arrived at appsink — pipeline data flow confirmed!")
+            logger.info("    dash_bridge=%s, CV2_AVAILABLE=%s", self._dash_bridge is not None, CV2_AVAILABLE)
 
 
 
