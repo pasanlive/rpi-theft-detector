@@ -181,7 +181,7 @@ GST_DEBUG=hailonet:4 python main.py  # Verbose Hailo element logs
 rtspsrc location=rtsp://... latency=100 drop-on-latency=true protocols=tcp
   ! rtph264depay
   ! h264parse
-  ! v4l2h264dec                          ← RPi5 hardware H.264 decoder
+  ! avdec_h264 (or v4l2h264dec)           ← Auto-detected (avdec_h264 on RPi5, v4l2h264dec on RPi4)
   ! video/x-raw,format=NV12
   ! videoconvert
   ! video/x-raw,format=RGB,width=640,height=480
@@ -199,7 +199,7 @@ rtspsrc location=rtsp://... latency=100 drop-on-latency=true protocols=tcp
 |---|---|
 | `hailortcli` not found | `sudo apt install hailo-all && sudo reboot` |
 | `import hailo` fails | Recreate venv with `--system-site-packages` |
-| `v4l2h264dec` not found | `sudo apt install gstreamer1.0-plugins-good` |
+| `no element "v4l2h264dec"` | RPi 5 uses software decoding (`avdec_h264`). Pipeline now auto-detects decoders. Ensure `gstreamer1.0-libav` is installed: `sudo apt install gstreamer1.0-libav` |
 | RTSP connection timeout | Check camera IP, port, and credentials |
 | High CPU usage | Increase `INFERENCE_INTERVAL_SEC` in config.py |
 | Alert flood | Increase `ALERT_COOLDOWN_SEC` |

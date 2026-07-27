@@ -140,6 +140,16 @@ class IngestionEngine:
           is processed, preventing metadata lag.
         - ``sync=false`` disables clock synchronization — process ASAP.
         """
+        # Dynamically detect available H.264 decoder
+        # Note: Raspberry Pi 5 uses software decoding via `avdec_h264` (Cortex-A76),
+        # while Raspberry Pi 4 uses hardware decoding via `v4l2h264dec`.
+        decoder_elem = "avdec_h264"
+        for dec in ["v4l2h264dec", "avdec_h264", "openh264dec"]:
+            if Gst.ElementFactory.find(dec) is not None:
+                decoder_elem = dec
+                break
+        logger.info("Using H.264 decoder element: %s", decoder_elem)
+
         pipeline_str = (
             f"rtspsrc location={self._rtsp_uri} "
             f"  latency={GST_RTSP_LATENCY_MS} "
@@ -147,7 +157,7 @@ class IngestionEngine:
             f"  protocols=tcp "
             f"! rtph264depay "
             f"! h264parse "
-            f"! v4l2h264dec "
+            f"! {decoder_elem} "
             f"! video/x-raw,format=NV12 "
             f"! videoconvert "
             f"! video/x-raw,format=RGB,width={self._frame_width},height={self._frame_height} "
