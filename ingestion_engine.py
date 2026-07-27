@@ -71,6 +71,7 @@ except ImportError:
     HAILO_AVAILABLE = False
 
 from config import (
+    CAMERA_SOURCE,
     RTSP_URI,
     HEF_MODEL_PATH,
     HAILO_POST_SO,
@@ -92,6 +93,8 @@ class IngestionEngine:
     ----------
     bridge : ThreadBridge
         The lock-free deque bridge to push keypoint vectors into.
+    camera_source : str, optional
+        Camera source type: ``"picam"`` (Pi Camera 2), ``"rtsp"``, or ``"v4l2"``.
     rtsp_uri : str, optional
         RTSP camera URL. Defaults to ``config.RTSP_URI``.
     hef_path : str, optional
@@ -106,6 +109,7 @@ class IngestionEngine:
     def __init__(
         self,
         bridge: ThreadBridge,
+        camera_source: str = CAMERA_SOURCE,
         rtsp_uri: str = RTSP_URI,
         hef_path: str = HEF_MODEL_PATH,
         dash_bridge: Optional[Any] = None,
@@ -123,6 +127,7 @@ class IngestionEngine:
 
         self._bridge = bridge
         self._dash_bridge = dash_bridge
+        self._camera_source = camera_source.lower()
         self._rtsp_uri = rtsp_uri
         self._hef_path = hef_path
         self._pipeline: Optional[Gst.Pipeline] = None
@@ -133,60 +138,68 @@ class IngestionEngine:
 
         Gst.init(None)
         logger.info(
-            "IngestionEngine initialized — RTSP=%s, HEF=%s, CV2=%s, dashboard=%s",
-            self._rtsp_uri, self._hef_path,
+            "IngestionEngine initialized — source=%s, RTSP=%s, HEF=%s, CV2=%s, dashboard=%s",
+            self._camera_source, self._rtsp_uri, self._hef_path,
             CV2_AVAILABLE, self._dash_bridge is not None,
         )
 
     def build_pipeline(self) -> None:
-        """Construct and link the GStreamer pipeline.
-
-        Pipeline graph::
-
-            rtspsrc (drop-on-latency)
-            ! rtph265depay → h265parse → avdec_h265
-            → videoconvert → RGB
-            → queue (leaky) → hailonet (NPU inference)
-            → queue (leaky) → hailofilter (post-process)
-            → queue (leaky) → appsink (drop=true)
-
-        The ``!`` between ``rtspsrc`` and ``rtph265depay`` tells
-        ``gst_parse_launch`` to auto-link the dynamic RTSP pads using
-        caps matching. Video pads (encoding-name=H265) match the
-        depayloader and are linked automatically. Audio pads don't match
-        and are routed to a ``fakesink`` via the ``pad-added`` handler.
-
-        Design Notes:
-        - `rtspsrc` creates dynamic pads at runtime. `_on_rtspsrc_pad_added`
-          explicitly routes video pads to `video_in` queue and audio pads to `fakesink`.
-        - `queue name=video_in` decouples RTSP network socket reading from video
-          decoding and NPU inference, preventing RTSP timeouts under load.
-        - `appsink max-buffers=1 drop=true sync=false` ensures lowest latency.
-        """
-        # Auto-detect best available H.265 decoder element
-        decoder_elem = self._find_decoder("h265")
-        logger.info("Using H.265 decoder element: %s", decoder_elem)
-
-        pipeline_str = (
-            f'rtspsrc name=src location="{self._rtsp_uri}" '
-            f"  latency=200 "
-            f"  drop-on-latency=true "
-            f"  protocols=tcp "
-            f"! queue name=video_in max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
-            f"! rtph265depay "
-            f"! h265parse config-interval=-1 "
-            f"! {decoder_elem} "
-            f"! videoconvert "
-            f"! videoscale "
-            f"! video/x-raw, width=640, height=640, format=RGB "
-            f"! queue max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
-            f"! hailonet hef-path={self._hef_path} batch-size=1 "
-            f"  scheduling-algorithm=0 force-writable=true "
-            f"! queue max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
-            f"! hailofilter so-path={HAILO_POST_SO} qos=false "
-            f"! queue max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
-            f"! appsink name=sink emit-signals=true max-buffers=1 drop=true sync=false"
-        )
+        """Construct and link the GStreamer pipeline for Pi Cam 2, RTSP, or V4L2."""
+        if self._camera_source in ["picam", "libcamerasrc", "camera"]:
+            logger.info("Configuring pipeline for Raspberry Pi Camera Module 2 (libcamerasrc)...")
+            pipeline_str = (
+                "libcamerasrc name=src "
+                "! video/x-raw, width=1280, height=720, format=NV12 "
+                "! videoconvert "
+                "! videoscale "
+                "! video/x-raw, width=640, height=640, format=RGB "
+                f"! queue max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
+                f"! hailonet hef-path={self._hef_path} batch-size=1 "
+                f"  scheduling-algorithm=0 force-writable=true "
+                f"! queue max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
+                f"! hailofilter so-path={HAILO_POST_SO} qos=false "
+                f"! queue max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
+                f"! appsink name=sink emit-signals=true max-buffers=1 drop=true sync=false"
+            )
+        elif self._camera_source in ["v4l2", "usb", "webcam"]:
+            logger.info("Configuring pipeline for V4L2 USB Webcam (v4l2src)...")
+            pipeline_str = (
+                "v4l2src name=src device=/dev/video0 "
+                "! videoconvert "
+                "! videoscale "
+                "! video/x-raw, width=640, height=640, format=RGB "
+                f"! queue max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
+                f"! hailonet hef-path={self._hef_path} batch-size=1 "
+                f"  scheduling-algorithm=0 force-writable=true "
+                f"! queue max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
+                f"! hailofilter so-path={HAILO_POST_SO} qos=false "
+                f"! queue max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
+                f"! appsink name=sink emit-signals=true max-buffers=1 drop=true sync=false"
+            )
+        else:
+            # Default to RTSP network stream
+            decoder_elem = self._find_decoder("h265")
+            logger.info("Configuring RTSP stream pipeline (using decoder: %s)...", decoder_elem)
+            pipeline_str = (
+                f'rtspsrc name=src location="{self._rtsp_uri}" '
+                f"  latency=200 "
+                f"  drop-on-latency=true "
+                f"  protocols=tcp "
+                f"! queue name=video_in max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
+                f"! rtph265depay "
+                f"! h265parse config-interval=-1 "
+                f"! {decoder_elem} "
+                f"! videoconvert "
+                f"! videoscale "
+                f"! video/x-raw, width=640, height=640, format=RGB "
+                f"! queue max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
+                f"! hailonet hef-path={self._hef_path} batch-size=1 "
+                f"  scheduling-algorithm=0 force-writable=true "
+                f"! queue max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
+                f"! hailofilter so-path={HAILO_POST_SO} qos=false "
+                f"! queue max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
+                f"! appsink name=sink emit-signals=true max-buffers=1 drop=true sync=false"
+            )
 
         logger.info("Building GStreamer pipeline:\n%s", pipeline_str)
 
@@ -194,9 +207,9 @@ class IngestionEngine:
         if self._pipeline is None:
             raise RuntimeError("Failed to parse GStreamer pipeline string.")
 
-        # Connect pad-added handler for dynamic video and audio routing
+        # Connect dynamic pad-added handler if using RTSP source
         rtspsrc_elem = self._pipeline.get_by_name("src")
-        if rtspsrc_elem is not None:
+        if rtspsrc_elem is not None and self._camera_source not in ["picam", "libcamerasrc", "v4l2", "usb"]:
             rtspsrc_elem.connect("pad-added", self._on_rtspsrc_pad_added)
             rtspsrc_elem.connect("no-more-pads", self._on_rtspsrc_no_more_pads)
             logger.info("Connected pad-added signal handler to rtspsrc element '%s'.", rtspsrc_elem.get_name())

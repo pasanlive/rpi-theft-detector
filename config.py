@@ -11,7 +11,10 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent
 MODEL_DIR = PROJECT_ROOT / "models"
 
-# ─── RTSP Camera Configuration ───────────────────────────────────────────────
+# ─── Camera Configuration ───────────────────────────────────────────────────
+# Source options: "picam" (Pi Camera Module 2 via libcamerasrc), "rtsp", or "v4l2"
+CAMERA_SOURCE = os.environ.get("CAMERA_SOURCE", "picam").lower()
+
 RTSP_URI = os.environ.get(
     "RTSP_URI",
     "rtsp://admin:ODPEDI@192.168.0.102:554/h264/ch1/sub/av_stream"

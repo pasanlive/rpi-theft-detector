@@ -31,7 +31,7 @@ import os
 import signal
 import sys
 
-from config import INFERENCE_INTERVAL_SEC, MODEL_WEIGHTS_PATH
+from config import INFERENCE_INTERVAL_SEC, MODEL_WEIGHTS_PATH, CAMERA_SOURCE
 
 # ─── Logging Setup ─────────────────────────────────────────────────────────────
 
@@ -55,8 +55,18 @@ def main() -> int:
     enable_dashboard = "--no-dashboard" not in sys.argv
     dashboard_port = int(os.environ.get("DASHBOARD_PORT", "5000"))
 
+    # Determine camera source (CLI flag > ENV var > default)
+    camera_source = CAMERA_SOURCE
+    if "--picam" in sys.argv or "--camera" in sys.argv:
+        camera_source = "picam"
+    elif "--rtsp" in sys.argv:
+        camera_source = "rtsp"
+    elif "--v4l2" in sys.argv or "--usb" in sys.argv:
+        camera_source = "v4l2"
+
     logger.info("═══════════════════════════════════════════════════════════")
     logger.info("  RPi5 Theft Detector — Zero-Copy Video Analytics Pipeline")
+    logger.info("  Camera Source: %s", camera_source.upper())
     logger.info("═══════════════════════════════════════════════════════════")
 
     # ── Phase 2: Thread Bridge ─────────────────────────────────────────────
@@ -94,13 +104,10 @@ def main() -> int:
         )
 
     # ── Composite Result Callback ──────────────────────────────────────────
-    # Fans out classification results to both AlertHandler and Dashboard
-    # without modifying ConsumerThread or AlertHandler code.
     def _on_classification(label: str, confidence: float) -> None:
         alert_handler.on_classification(label, confidence)
         if dash_bridge is not None:
             dash_bridge.push_inference(label, confidence)
-            # Also push theft alerts to the dashboard feed
             if label == "theft" and confidence >= 0.7:
                 dash_bridge.push_alert(
                     "theft",
@@ -124,7 +131,11 @@ def main() -> int:
     # ── Phase 1: GStreamer Ingestion ───────────────────────────────────────
     from ingestion_engine import IngestionEngine
 
-    engine = IngestionEngine(bridge=bridge, dash_bridge=dash_bridge)
+    engine = IngestionEngine(
+        bridge=bridge,
+        camera_source=camera_source,
+        dash_bridge=dash_bridge,
+    )
 
     # ── Signal Handlers for Graceful Shutdown ──────────────────────────────
     def _shutdown_handler(signum: int, frame: object) -> None:
