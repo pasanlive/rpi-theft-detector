@@ -16,6 +16,7 @@ Production (from main.py)::
     start_dashboard(dash_bridge, port=5000)
 """
 
+from werkzeug.debug import console
 from __future__ import annotations
 
 import json

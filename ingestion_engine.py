@@ -129,6 +129,7 @@ class IngestionEngine:
         self._main_loop: Optional[GLib.MainLoop] = None
         self._frame_width = FRAME_WIDTH
         self._frame_height = FRAME_HEIGHT
+        self._sample_counter = 0
 
         Gst.init(None)
         logger.info(
@@ -232,18 +233,19 @@ class IngestionEngine:
 
         caps = pad.query_caps(None)
         caps_str = caps.to_string().lower() if caps is not None else ""
-        logger.debug("RTSP pad added caps: %s", caps_str)
+        logger.info("RTSP stream pad added: %s", caps_str)
 
-        # Match video tracks and exclude audio tracks (e.g. 'media=(string)audio')
-        is_audio = "media=(string)audio" in caps_str or "audio/" in caps_str
-        is_video = "media=(string)video" in caps_str or "h264" in caps_str or "video/" in caps_str or not caps_str
+        # Ignore audio tracks
+        if "audio" in caps_str:
+            logger.info("Ignoring audio stream pad: %s", caps_str)
+            return
 
-        if is_video and not is_audio:
-            try:
-                res = pad.link(sink_pad)
-                logger.info("Successfully linked dynamic RTSP video pad to depayloader.")
-            except Exception as exc:
-                logger.warning("Could not link RTSP pad (%s): %s", caps_str, exc)
+        # Link video stream pad to depayloader
+        try:
+            pad.link(sink_pad)
+            logger.info("Successfully linked RTSP video stream to depayloader.")
+        except Exception as exc:
+            logger.warning("Could not link RTSP pad (%s): %s", caps_str, exc)
 
     def start(self) -> None:
         """Start the pipeline and enter the GLib main loop.
@@ -399,6 +401,9 @@ class IngestionEngine:
                     ret_val, jpeg_buf = cv2.imencode(".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
                     if ret_val:
                         self._dash_bridge.push_jpeg_frame(jpeg_buf.tobytes())
+                        self._sample_counter += 1
+                        if self._sample_counter == 1 or self._sample_counter % 50 == 0:
+                            logger.info("RTSP camera frame #%d pushed to live video feed.", self._sample_counter)
                     buffer.unmap(map_info)
             except Exception as exc:
                 logger.error("Dashboard frame encoding error: %s", exc, exc_info=True)
