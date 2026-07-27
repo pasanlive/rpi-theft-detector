@@ -177,6 +177,7 @@ class IngestionEngine:
             f"! h265parse config-interval=-1 "
             f"! {decoder_elem} "
             f"! videoconvert "
+            f"! videoscale "
             f"! video/x-raw,format=RGB "
             f"! queue max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
             f"! hailonet hef-path={self._hef_path} batch-size=1 "
