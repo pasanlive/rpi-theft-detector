@@ -141,23 +141,20 @@ class IngestionEngine:
     def build_pipeline(self) -> None:
         """Construct and link the GStreamer pipeline.
 
-        Pipeline graph (elements in brackets are created dynamically)::
+        Pipeline graph::
 
-            rtspsrc (drop-on-latency) →
-            [rtph264depay OR rtph265depay] → [h264parse OR h265parse] →
-            [avdec_h264 OR avdec_h265] →
-            videoconvert → RGB →
-            queue (leaky) →
-            hailonet (NPU inference) →
-            queue (leaky) →
-            hailofilter (post-process → attach metadata) →
-            queue (leaky) →
-            appsink (metadata-only, drop=true)
+            rtspsrc (drop-on-latency)
+            ! rtph265depay → h265parse → avdec_h265
+            → videoconvert → RGB
+            → queue (leaky) → hailonet (NPU inference)
+            → queue (leaky) → hailofilter (post-process)
+            → queue (leaky) → appsink (drop=true)
 
-        The depayloader, parser, and decoder are created dynamically in the
-        ``pad-added`` callback based on the actual codec negotiated by the
-        RTSP stream (H.264 or H.265). This ensures compatibility regardless
-        of what the camera actually sends.
+        The ``!`` between ``rtspsrc`` and ``rtph265depay`` tells
+        ``gst_parse_launch`` to auto-link the dynamic RTSP pads using
+        caps matching. Video pads (encoding-name=H265) match the
+        depayloader and are linked automatically. Audio pads don't match
+        and are routed to a ``fakesink`` via the ``pad-added`` handler.
 
         Design Notes:
         - Three ``queue`` elements with ``leaky=downstream`` create backpressure
@@ -166,15 +163,19 @@ class IngestionEngine:
           is processed, preventing metadata lag.
         - ``sync=false`` disables clock synchronization — process ASAP.
         """
-        # Build pipeline string WITHOUT depay/parse/decode — those are added
-        # dynamically in _on_rtspsrc_pad_added after codec auto-detection.
-        # rtspsrc and the videoconvert chain are separate (no ! between them).
+        # Auto-detect best available H.265 decoder
+        decoder_elem = self._find_decoder("h265")
+        logger.info("Using H.265 decoder element: %s", decoder_elem)
+
         pipeline_str = (
             f'rtspsrc name=src location="{self._rtsp_uri}" '
             f"  latency={GST_RTSP_LATENCY_MS} "
             f"  drop-on-latency=true "
             f"  protocols=tcp "
-            f"videoconvert name=vconv "
+            f"! rtph265depay "
+            f"! h265parse "
+            f"! {decoder_elem} "
+            f"! videoconvert "
             f"! video/x-raw,format=RGB "
             f"! queue max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
             f"! hailonet hef-path={self._hef_path} batch-size=1 "
@@ -191,7 +192,7 @@ class IngestionEngine:
         if self._pipeline is None:
             raise RuntimeError("Failed to parse GStreamer pipeline string.")
 
-        # Connect dynamic pad-added signal for RTSP source
+        # Connect pad-added handler for audio → fakesink routing
         rtspsrc_elem = self._pipeline.get_by_name("src")
         if rtspsrc_elem is not None:
             rtspsrc_elem.connect("pad-added", self._on_rtspsrc_pad_added)
@@ -199,18 +200,6 @@ class IngestionEngine:
             logger.info("Connected pad-added signal handler to rtspsrc element '%s'.", rtspsrc_elem.get_name())
         else:
             logger.error("CRITICAL: Could not find 'src' rtspsrc element in pipeline!")
-            # Fallback: find rtspsrc by factory name
-            it = self._pipeline.iterate_elements()
-            while True:
-                result, elem = it.next()
-                if result != Gst.IteratorResult.OK:
-                    break
-                factory = elem.get_factory()
-                if factory and factory.get_name() == "rtspsrc":
-                    logger.info("Found rtspsrc by factory scan: '%s'. Connecting pad-added.", elem.get_name())
-                    elem.connect("pad-added", self._on_rtspsrc_pad_added)
-                    elem.connect("no-more-pads", self._on_rtspsrc_no_more_pads)
-                    break
 
         # Connect appsink callback
         appsink = self._pipeline.get_by_name("sink")
@@ -257,23 +246,23 @@ class IngestionEngine:
         logger.info("rtspsrc: no-more-pads — all RTSP stream pads have been created.")
 
     def _on_rtspsrc_pad_added(self, rtspsrc: Gst.Element, pad: Gst.Pad) -> None:
-        """Dynamically detect codec and link RTSP pads.
+        """Route audio pads to fakesink; video is auto-linked by gst_parse_launch.
 
-        Auto-detects H.264 vs H.265 from the RTP caps and dynamically
-        creates the correct depayloader → parser → decoder chain.
-        Audio pads are linked to a ``fakesink`` to prevent 'not-linked' errors.
+        When ``!`` is used between ``rtspsrc`` and ``rtph265depay`` in the
+        pipeline string, GStreamer internally handles linking video pads
+        whose caps match the depayloader. Audio pads don't match and must
+        be explicitly routed to a ``fakesink`` to prevent 'not-linked' errors.
         """
         caps = pad.query_caps(None)
         caps_str = caps.to_string().lower() if caps is not None else ""
-        logger.info(">>> rtspsrc pad-added: pad=%s caps=%s", pad.get_name(), caps_str[:250])
+        logger.info("rtspsrc pad-added: pad=%s caps=%s", pad.get_name(), caps_str[:200])
 
         if self._pipeline is None:
-            logger.warning("pad-added: pipeline is None, skipping.")
             return
 
-        # ── Audio: link to fakesink to prevent 'not-linked' errors ──
+        # Route audio pads to fakesink to prevent 'not-linked' pipeline crash
         if "audio" in caps_str:
-            logger.info("Linking audio pad to fakesink (prevents 'not-linked' error).")
+            logger.info("Routing audio pad '%s' to fakesink.", pad.get_name())
             fakesink = Gst.ElementFactory.make("fakesink", None)
             if fakesink is not None:
                 fakesink.set_property("async", False)
@@ -282,70 +271,8 @@ class IngestionEngine:
                 pad.link(fakesink.get_static_pad("sink"))
             return
 
-        # ── Video: auto-detect codec and create decoder chain ──
-        if "h265" in caps_str or "hevc" in caps_str:
-            codec = "h265"
-            depay_factory = "rtph265depay"
-            parser_factory = "h265parse"
-        elif "h264" in caps_str:
-            codec = "h264"
-            depay_factory = "rtph264depay"
-            parser_factory = "h264parse"
-        else:
-            logger.warning("Unknown video codec in pad caps, skipping: %s", caps_str[:250])
-            return
-
-        decoder_factory = self._find_decoder(codec)
-        logger.info(
-            "Detected %s stream — creating chain: %s ! %s ! %s",
-            codec.upper(), depay_factory, parser_factory, decoder_factory,
-        )
-
-        # Create elements
-        depay = Gst.ElementFactory.make(depay_factory, "depay")
-        parser = Gst.ElementFactory.make(parser_factory, "parser")
-        decoder = Gst.ElementFactory.make(decoder_factory, "decoder")
-
-        if not all([depay, parser, decoder]):
-            logger.error(
-                "Failed to create decoder chain elements: depay=%s parser=%s decoder=%s",
-                depay, parser, decoder,
-            )
-            return
-
-        # Add elements to the pipeline
-        self._pipeline.add(depay)
-        self._pipeline.add(parser)
-        self._pipeline.add(decoder)
-
-        # Link: depay → parser → decoder → videoconvert(vconv)
-        if not depay.link(parser):
-            logger.error("Failed to link %s → %s", depay_factory, parser_factory)
-            return
-        if not parser.link(decoder):
-            logger.error("Failed to link %s → %s", parser_factory, decoder_factory)
-            return
-
-        vconv = self._pipeline.get_by_name("vconv")
-        if vconv is None:
-            logger.error("Could not find 'vconv' (videoconvert) element in pipeline!")
-            return
-        if not decoder.link(vconv):
-            logger.error("Failed to link %s → videoconvert", decoder_factory)
-            return
-
-        # Sync new elements to pipeline state (PLAYING)
-        depay.sync_state_with_parent()
-        parser.sync_state_with_parent()
-        decoder.sync_state_with_parent()
-
-        # Link the RTSP source pad to the depayloader
-        sink_pad = depay.get_static_pad("sink")
-        ret = pad.link(sink_pad)
-        logger.info(
-            "Linked RTSP %s video pad '%s' → %s → %s → %s → videoconvert (result: %s)",
-            codec.upper(), pad.get_name(), depay_factory, parser_factory, decoder_factory, ret,
-        )
+        # Video pads are auto-linked by gst_parse_launch's internal handler
+        logger.info("Video pad '%s' — auto-linking to rtph265depay (handled by GStreamer).", pad.get_name())
 
     def start(self) -> None:
         """Start the pipeline and enter the GLib main loop.
