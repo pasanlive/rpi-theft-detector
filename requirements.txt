@@ -1,0 +1,13 @@
+# Python dependencies for RPi5 Theft Detector Pipeline
+# ───────────────────────────────────────────────────────
+#
+# NOTE: HailoRT bindings (hailort, hailo) and GStreamer Python
+# bindings (PyGObject / gi.repository) are system packages
+# installed via `sudo apt install hailo-all python3-gst-1.0`.
+# They are NOT pip-installable. Create your venv with:
+#   python3 -m venv --system-site-packages venv
+
+numpy>=1.24.0
+torch>=2.0.0
+flask>=3.0.0
+psutil>=5.9.0

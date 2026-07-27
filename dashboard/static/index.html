@@ -1,0 +1,1138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Real-time monitoring dashboard for RPi5 Theft Detection System with Hailo-8 AI HAT+">
+    <title>RPi5 Theft Detector — Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        /* ─── Reset & Base ──────────────────────────────────────────────── */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg-deep: #060a13;
+            --bg-primary: #0b1021;
+            --bg-card: rgba(13, 20, 40, 0.75);
+            --bg-card-inner: rgba(15, 25, 50, 0.5);
+            --border-subtle: rgba(56, 189, 248, 0.06);
+            --border-active: rgba(56, 189, 248, 0.18);
+            --border-glow: rgba(56, 189, 248, 0.35);
+
+            --accent: #38bdf8;
+            --accent-bright: #7dd3fc;
+            --accent-dim: #0c4a6e;
+            --success: #34d399;
+            --success-dim: #065f46;
+            --danger: #f87171;
+            --danger-bright: #fca5a5;
+            --danger-dim: #7f1d1d;
+            --warning: #fbbf24;
+            --warning-dim: #78350f;
+
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-muted: #475569;
+
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+
+            --radius-sm: 8px;
+            --radius-md: 14px;
+            --radius-lg: 20px;
+            --radius-xl: 28px;
+
+            --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.25), 0 0 0 1px var(--border-subtle);
+            --shadow-glow: 0 0 30px rgba(56, 189, 248, 0.08);
+
+            --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+            --transition-smooth: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        html { font-size: 15px; }
+
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg-deep);
+            color: var(--text-primary);
+            line-height: 1.5;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Animated background mesh */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(ellipse 600px 400px at 15% 20%, rgba(56, 189, 248, 0.04) 0%, transparent 70%),
+                radial-gradient(ellipse 500px 500px at 85% 80%, rgba(168, 85, 247, 0.03) 0%, transparent 70%),
+                radial-gradient(ellipse 400px 300px at 50% 50%, rgba(52, 211, 153, 0.02) 0%, transparent 70%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* ─── Layout ────────────────────────────────────────────────────── */
+        .app {
+            position: relative;
+            z-index: 1;
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 20px 24px 40px;
+        }
+
+        /* ─── Header ───────────────────────────────────────────────────── */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 24px;
+            background: var(--bg-card);
+            backdrop-filter: blur(20px) saturate(1.2);
+            -webkit-backdrop-filter: blur(20px) saturate(1.2);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            margin-bottom: 20px;
+            box-shadow: var(--shadow-card);
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: var(--radius-sm);
+            background: linear-gradient(135deg, var(--accent) 0%, #a855f7 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.2);
+        }
+
+        .header-title {
+            font-size: 1.15rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .header-subtitle {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-weight: 400;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .connection-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            padding: 6px 14px;
+            border-radius: 100px;
+            background: var(--bg-card-inner);
+            border: 1px solid var(--border-subtle);
+        }
+
+        .connection-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text-muted);
+            transition: background var(--transition-smooth);
+        }
+
+        .connection-dot.connected {
+            background: var(--success);
+            box-shadow: 0 0 8px rgba(52, 211, 153, 0.5);
+            animation: pulse-dot 2s ease-in-out infinite;
+        }
+
+        .connection-dot.disconnected {
+            background: var(--danger);
+            box-shadow: 0 0 8px rgba(248, 113, 113, 0.5);
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .clock {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        /* ─── Grid Layout ──────────────────────────────────────────────── */
+        .grid-main {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .grid-gauges {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        /* ─── Cards ────────────────────────────────────────────────────── */
+        .card {
+            background: var(--bg-card);
+            backdrop-filter: blur(16px) saturate(1.2);
+            -webkit-backdrop-filter: blur(16px) saturate(1.2);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-card);
+            overflow: hidden;
+            transition: border-color var(--transition-smooth), box-shadow var(--transition-smooth);
+        }
+
+        .card:hover {
+            border-color: var(--border-active);
+            box-shadow: var(--shadow-card), var(--shadow-glow);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px 12px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .card-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-secondary);
+        }
+
+        .card-title-icon {
+            font-size: 1rem;
+        }
+
+        .card-badge {
+            font-size: 0.7rem;
+            padding: 3px 10px;
+            border-radius: 100px;
+            font-weight: 600;
+            font-family: var(--font-mono);
+        }
+
+        .card-body {
+            padding: 20px;
+        }
+
+        /* ─── Inference Panel ──────────────────────────────────────────── */
+        .inference-content {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .skeleton-container {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            background: var(--bg-card-inner);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle);
+            overflow: hidden;
+        }
+
+        .skeleton-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .skeleton-overlay {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            padding: 4px 8px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: var(--radius-sm);
+        }
+
+        .inference-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .stat-box {
+            padding: 14px 16px;
+            background: var(--bg-card-inner);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-subtle);
+        }
+
+        .stat-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            font-family: var(--font-mono);
+            letter-spacing: -0.02em;
+        }
+
+        .stat-value.normal { color: var(--success); }
+        .stat-value.theft { color: var(--danger); animation: flash-danger 0.8s ease infinite; }
+
+        @keyframes flash-danger {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .confidence-bar-track {
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 3px;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+
+        .confidence-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            background: var(--success);
+            transition: width 400ms ease, background 400ms ease;
+        }
+
+        .confidence-bar-fill.theft {
+            background: linear-gradient(90deg, var(--danger) 0%, var(--warning) 100%);
+        }
+
+        /* ─── Gauge Cards ──────────────────────────────────────────────── */
+        .gauge-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px 16px;
+        }
+
+        .gauge-svg {
+            width: 110px;
+            height: 110px;
+            margin-bottom: 12px;
+        }
+
+        .gauge-track {
+            fill: none;
+            stroke: rgba(255, 255, 255, 0.05);
+            stroke-width: 8;
+            stroke-linecap: round;
+        }
+
+        .gauge-fill {
+            fill: none;
+            stroke-width: 8;
+            stroke-linecap: round;
+            transition: stroke-dashoffset 600ms ease, stroke 400ms ease;
+            filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.3));
+        }
+
+        .gauge-fill.cpu { stroke: var(--accent); }
+        .gauge-fill.memory { stroke: #a78bfa; }
+        .gauge-fill.temp { stroke: var(--success); }
+        .gauge-fill.temp-warm { stroke: var(--warning); }
+        .gauge-fill.temp-hot { stroke: var(--danger); }
+        .gauge-fill.disk { stroke: #fb923c; }
+
+        .gauge-text {
+            font-family: var(--font-mono);
+            fill: var(--text-primary);
+            text-anchor: middle;
+            dominant-baseline: central;
+        }
+
+        .gauge-value { font-size: 22px; font-weight: 700; }
+        .gauge-unit { font-size: 11px; fill: var(--text-muted); }
+
+        .gauge-label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-secondary);
+        }
+
+        .gauge-detail {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            margin-top: 4px;
+        }
+
+        /* ─── Sparkline Charts ─────────────────────────────────────────── */
+        .sparkline-container {
+            display: flex;
+            gap: 20px;
+            padding: 16px 20px;
+            border-top: 1px solid var(--border-subtle);
+        }
+
+        .sparkline-box {
+            flex: 1;
+        }
+
+        .sparkline-label {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+
+        .sparkline-canvas {
+            width: 100%;
+            height: 40px;
+            border-radius: var(--radius-sm);
+            background: var(--bg-card-inner);
+        }
+
+        /* ─── Alert Feed ───────────────────────────────────────────────── */
+        .alert-feed {
+            max-height: 380px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255,255,255,0.08) transparent;
+        }
+
+        .alert-feed::-webkit-scrollbar { width: 4px; }
+        .alert-feed::-webkit-scrollbar-track { background: transparent; }
+        .alert-feed::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+        .alert-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border-subtle);
+            transition: background var(--transition-fast);
+            animation: alert-slide-in 300ms ease forwards;
+        }
+
+        .alert-item:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        @keyframes alert-slide-in {
+            from { opacity: 0; transform: translateY(-8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .alert-icon {
+            font-size: 1.1rem;
+            margin-top: 1px;
+            flex-shrink: 0;
+        }
+
+        .alert-body { flex: 1; min-width: 0; }
+
+        .alert-message {
+            font-size: 0.85rem;
+            font-weight: 500;
+            word-break: break-word;
+        }
+
+        .alert-meta {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            margin-top: 2px;
+        }
+
+        .alert-confidence {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            padding: 2px 8px;
+            border-radius: 100px;
+            font-weight: 600;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .alert-item.theft .alert-message { color: var(--danger); }
+        .alert-item.theft .alert-confidence {
+            background: var(--danger-dim);
+            color: var(--danger-bright);
+        }
+        .alert-item.warning .alert-message { color: var(--warning); }
+        .alert-item.info .alert-message { color: var(--accent-bright); }
+
+        .alert-empty {
+            padding: 40px 20px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        .clear-btn {
+            font-size: 0.72rem;
+            padding: 4px 12px;
+            border-radius: 100px;
+            background: var(--bg-card-inner);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-family: var(--font-sans);
+            font-weight: 500;
+            transition: all var(--transition-fast);
+        }
+
+        .clear-btn:hover {
+            border-color: var(--border-active);
+            color: var(--text-primary);
+        }
+
+        /* ─── Uptime / Footer ──────────────────────────────────────────── */
+        .footer-stats {
+            display: flex;
+            justify-content: center;
+            gap: 32px;
+            padding: 16px;
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            font-family: var(--font-mono);
+        }
+
+        .footer-stats span { display: flex; align-items: center; gap: 6px; }
+
+        /* ─── Responsive ───────────────────────────────────────────────── */
+        @media (max-width: 1024px) {
+            .grid-main { grid-template-columns: 1fr; }
+            .grid-gauges { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        @media (max-width: 600px) {
+            .app { padding: 12px; }
+            .header { flex-direction: column; gap: 12px; text-align: center; }
+            .header-right { justify-content: center; }
+            .grid-gauges { grid-template-columns: 1fr 1fr; }
+            .inference-stats { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+<div class="app" id="app">
+    <!-- ─── Header ──────────────────────────────────────────────────── -->
+    <header class="header">
+        <div class="header-left">
+            <div class="logo-icon">🛡</div>
+            <div>
+                <div class="header-title">RPi5 Theft Detector</div>
+                <div class="header-subtitle">Hailo-8 AI HAT+ · BiLSTM Pipeline</div>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="connection-badge" id="connectionBadge">
+                <div class="connection-dot" id="connectionDot"></div>
+                <span id="connectionText">Connecting…</span>
+            </div>
+            <div class="clock" id="clock">--:--:--</div>
+        </div>
+    </header>
+
+    <!-- ─── Main Grid: Inference + System ───────────────────────────── -->
+    <div class="grid-main">
+        <!-- Inference Panel -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">
+                    <span class="card-title-icon">🧠</span> Live Inference
+                </div>
+                <div class="card-badge" id="fpsBadge" style="background:var(--accent-dim);color:var(--accent-bright);">— FPS</div>
+            </div>
+            <div class="card-body">
+                <div class="inference-content">
+                    <div class="skeleton-container">
+                        <canvas class="skeleton-canvas" id="skeletonCanvas"></canvas>
+                        <div class="skeleton-overlay" id="skeletonOverlay">17 COCO Keypoints</div>
+                    </div>
+                    <div class="inference-stats">
+                        <div class="stat-box">
+                            <div class="stat-label">Action</div>
+                            <div class="stat-value normal" id="actionLabel">—</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-label">Confidence</div>
+                            <div class="stat-value" id="confidenceValue" style="color:var(--text-primary)">0%</div>
+                            <div class="confidence-bar-track">
+                                <div class="confidence-bar-fill" id="confidenceBar" style="width:0%"></div>
+                            </div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-label">Total Frames</div>
+                            <div class="stat-value" id="frameCount" style="color:var(--text-primary);font-size:1.2rem;">0</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-label">Pipeline</div>
+                            <div class="stat-value" id="pipelineStatus" style="color:var(--text-muted);font-size:1rem;">OFFLINE</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Alerts Panel -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">
+                    <span class="card-title-icon">🔔</span> Alerts & Notifications
+                </div>
+                <button class="clear-btn" id="clearAlertsBtn" onclick="clearAlerts()">Clear</button>
+            </div>
+            <div class="alert-feed" id="alertFeed">
+                <div class="alert-empty" id="alertEmpty">No alerts yet — monitoring…</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── Gauge Row ───────────────────────────────────────────────── -->
+    <div class="grid-gauges">
+        <!-- CPU Gauge -->
+        <div class="card gauge-card">
+            <svg class="gauge-svg" viewBox="0 0 120 120" id="cpuGauge">
+                <circle class="gauge-track" cx="60" cy="60" r="48" />
+                <circle class="gauge-fill cpu" cx="60" cy="60" r="48"
+                        stroke-dasharray="301.6" stroke-dashoffset="301.6"
+                        transform="rotate(-90 60 60)" id="cpuArc"/>
+                <text class="gauge-text gauge-value" x="60" y="55" id="cpuText">0</text>
+                <text class="gauge-text gauge-unit" x="60" y="73">%</text>
+            </svg>
+            <div class="gauge-label">CPU</div>
+            <div class="gauge-detail" id="cpuDetail">— cores · — MHz</div>
+        </div>
+
+        <!-- Memory Gauge -->
+        <div class="card gauge-card">
+            <svg class="gauge-svg" viewBox="0 0 120 120">
+                <circle class="gauge-track" cx="60" cy="60" r="48" />
+                <circle class="gauge-fill memory" cx="60" cy="60" r="48"
+                        stroke-dasharray="301.6" stroke-dashoffset="301.6"
+                        transform="rotate(-90 60 60)" id="memArc"/>
+                <text class="gauge-text gauge-value" x="60" y="55" id="memText">0</text>
+                <text class="gauge-text gauge-unit" x="60" y="73">%</text>
+            </svg>
+            <div class="gauge-label">Memory</div>
+            <div class="gauge-detail" id="memDetail">— / — GB</div>
+        </div>
+
+        <!-- Temperature Gauge -->
+        <div class="card gauge-card">
+            <svg class="gauge-svg" viewBox="0 0 120 120">
+                <circle class="gauge-track" cx="60" cy="60" r="48" />
+                <circle class="gauge-fill temp" cx="60" cy="60" r="48"
+                        stroke-dasharray="301.6" stroke-dashoffset="301.6"
+                        transform="rotate(-90 60 60)" id="tempArc"/>
+                <text class="gauge-text gauge-value" x="60" y="55" id="tempText">—</text>
+                <text class="gauge-text gauge-unit" x="60" y="73">°C</text>
+            </svg>
+            <div class="gauge-label">Temperature</div>
+            <div class="gauge-detail" id="tempDetail">CPU Thermal</div>
+        </div>
+
+        <!-- Disk Gauge -->
+        <div class="card gauge-card">
+            <svg class="gauge-svg" viewBox="0 0 120 120">
+                <circle class="gauge-track" cx="60" cy="60" r="48" />
+                <circle class="gauge-fill disk" cx="60" cy="60" r="48"
+                        stroke-dasharray="301.6" stroke-dashoffset="301.6"
+                        transform="rotate(-90 60 60)" id="diskArc"/>
+                <text class="gauge-text gauge-value" x="60" y="55" id="diskText">0</text>
+                <text class="gauge-text gauge-unit" x="60" y="73">%</text>
+            </svg>
+            <div class="gauge-label">Disk</div>
+            <div class="gauge-detail" id="diskDetail">— / — GB</div>
+        </div>
+    </div>
+
+    <!-- ─── Sparkline History ───────────────────────────────────────── -->
+    <div class="card">
+        <div class="sparkline-container">
+            <div class="sparkline-box">
+                <div class="sparkline-label">📈 CPU History (60s)</div>
+                <canvas class="sparkline-canvas" id="cpuSparkline"></canvas>
+            </div>
+            <div class="sparkline-box">
+                <div class="sparkline-label">🌡 Temperature History (60s)</div>
+                <canvas class="sparkline-canvas" id="tempSparkline"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── Footer ──────────────────────────────────────────────────── -->
+    <div class="footer-stats">
+        <span>⏱ Uptime: <strong id="uptimeValue">0s</strong></span>
+        <span>📡 SSE Updates: <strong id="sseCount">0</strong></span>
+        <span>🔄 Last Update: <strong id="lastUpdate">—</strong></span>
+    </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════════
+//  RPi5 Theft Detector Dashboard — Real-time SSE Client
+// ═══════════════════════════════════════════════════════════════════════════════
+
+(() => {
+    'use strict';
+
+    // ─── Constants ────────────────────────────────────────────────────────────
+    const GAUGE_CIRCUMFERENCE = 2 * Math.PI * 48; // ~301.6
+    const COCO_SKELETON = [
+        [0, 1], [0, 2], [1, 3], [2, 4],           // Head
+        [5, 6],                                     // Shoulders
+        [5, 7], [7, 9],                             // Left arm
+        [6, 8], [8, 10],                            // Right arm
+        [5, 11], [6, 12],                           // Torso
+        [11, 12],                                   // Hips
+        [11, 13], [13, 15],                         // Left leg
+        [12, 14], [14, 16],                         // Right leg
+    ];
+
+    const KEYPOINT_COLORS = {
+        head: '#38bdf8',   // 0-4
+        arm: '#a78bfa',    // 5-10
+        torso: '#34d399',  // 5,6,11,12
+        leg: '#fbbf24',    // 11-16
+    };
+
+    // ─── State ────────────────────────────────────────────────────────────────
+    let sseCount = 0;
+    let connected = false;
+    let lastAlertIds = new Set();
+    let eventSource = null;
+
+    // ─── DOM References ───────────────────────────────────────────────────────
+    const $ = (id) => document.getElementById(id);
+
+    // ─── SSE Connection ───────────────────────────────────────────────────────
+    function connectSSE() {
+        if (eventSource) {
+            eventSource.close();
+        }
+
+        eventSource = new EventSource('/api/stream');
+
+        eventSource.onopen = () => {
+            connected = true;
+            updateConnectionStatus(true);
+        };
+
+        eventSource.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                sseCount++;
+                updateDashboard(data);
+            } catch (e) {
+                console.error('SSE parse error:', e);
+            }
+        };
+
+        eventSource.onerror = () => {
+            connected = false;
+            updateConnectionStatus(false);
+            // EventSource reconnects automatically
+        };
+    }
+
+    // ─── Update Functions ─────────────────────────────────────────────────────
+    function updateDashboard(data) {
+        updateConnectionStatus(true);
+        updateInference(data.inference);
+        updateSystemGauges(data.system);
+        updateAlerts(data.alerts);
+        updatePipeline(data.pipeline);
+        updateFooter(data);
+    }
+
+    function updateConnectionStatus(isConnected) {
+        const dot = $('connectionDot');
+        const text = $('connectionText');
+        dot.className = 'connection-dot ' + (isConnected ? 'connected' : 'disconnected');
+        text.textContent = isConnected ? 'Connected' : 'Disconnected';
+    }
+
+    function updateInference(inf) {
+        if (!inf) return;
+
+        // Action label
+        const actionEl = $('actionLabel');
+        const label = (inf.label || '—').toUpperCase();
+        actionEl.textContent = label;
+        actionEl.className = 'stat-value ' + (inf.label === 'theft' ? 'theft' : 'normal');
+
+        // Confidence
+        const conf = (inf.confidence || 0) * 100;
+        $('confidenceValue').textContent = conf.toFixed(1) + '%';
+
+        const bar = $('confidenceBar');
+        bar.style.width = conf + '%';
+        bar.className = 'confidence-bar-fill' + (inf.label === 'theft' ? ' theft' : '');
+
+        // FPS
+        $('fpsBadge').textContent = (inf.fps || 0).toFixed(1) + ' FPS';
+
+        // Frame count
+        $('frameCount').textContent = (inf.frame_count || 0).toLocaleString();
+
+        // Skeleton
+        drawSkeleton(inf.keypoints);
+    }
+
+    function updateSystemGauges(sys) {
+        if (!sys) return;
+
+        // CPU
+        const cpuPct = sys.cpu?.percent || 0;
+        setGauge($('cpuArc'), cpuPct, 100);
+        $('cpuText').textContent = Math.round(cpuPct);
+        $('cpuDetail').textContent =
+            `${sys.cpu?.cores || '—'} cores · ${sys.cpu?.freq_mhz || '—'} MHz`;
+
+        // Memory
+        const memPct = sys.memory?.percent || 0;
+        setGauge($('memArc'), memPct, 100);
+        $('memText').textContent = Math.round(memPct);
+        const memUsed = formatBytes(sys.memory?.used || 0);
+        const memTotal = formatBytes(sys.memory?.total || 0);
+        $('memDetail').textContent = `${memUsed} / ${memTotal}`;
+
+        // Temperature
+        const temp = sys.temperature?.cpu;
+        if (temp !== null && temp !== undefined) {
+            const tempPct = Math.min((temp / 85) * 100, 100);
+            setGauge($('tempArc'), tempPct, 100);
+            $('tempText').textContent = temp.toFixed(1);
+
+            const arc = $('tempArc');
+            arc.classList.remove('temp', 'temp-warm', 'temp-hot');
+            if (temp >= 70) arc.classList.add('temp-hot');
+            else if (temp >= 55) arc.classList.add('temp-warm');
+            else arc.classList.add('temp');
+
+            $('tempDetail').textContent =
+                temp >= 70 ? '⚠ THROTTLING RISK' :
+                temp >= 55 ? 'Warm' : 'Normal';
+        } else {
+            $('tempText').textContent = '—';
+        }
+
+        // Disk
+        const diskPct = sys.disk?.percent || 0;
+        setGauge($('diskArc'), diskPct, 100);
+        $('diskText').textContent = Math.round(diskPct);
+        const diskUsed = formatBytes(sys.disk?.used || 0);
+        const diskTotal = formatBytes(sys.disk?.total || 0);
+        $('diskDetail').textContent = `${diskUsed} / ${diskTotal}`;
+
+        // Sparklines
+        drawSparkline($('cpuSparkline'), sys.cpu_history || [], '#38bdf8', 100);
+        drawSparkline($('tempSparkline'), sys.temp_history || [], '#34d399', 85);
+    }
+
+    function updateAlerts(alerts) {
+        if (!alerts || alerts.length === 0) {
+            $('alertFeed').innerHTML = '<div class="alert-empty">No alerts yet — monitoring…</div>';
+            return;
+        }
+
+        const feed = $('alertFeed');
+        // Build new HTML only if alerts changed
+        const newIds = alerts.map(a => a.timestamp + a.type).join(',');
+        const currentIds = feed.dataset.ids || '';
+        if (newIds === currentIds) return;
+        feed.dataset.ids = newIds;
+
+        feed.innerHTML = alerts.map(alert => {
+            const time = formatTime(alert.timestamp);
+            const icon = alert.type === 'theft' ? '🚨' :
+                         alert.type === 'warning' ? '⚠️' : 'ℹ️';
+            const confBadge = alert.confidence > 0
+                ? `<div class="alert-confidence">${(alert.confidence * 100).toFixed(1)}%</div>`
+                : '';
+            return `
+                <div class="alert-item ${alert.type}">
+                    <div class="alert-icon">${icon}</div>
+                    <div class="alert-body">
+                        <div class="alert-message">${escapeHtml(alert.message)}</div>
+                        <div class="alert-meta">${time}</div>
+                    </div>
+                    ${confBadge}
+                </div>`;
+        }).join('');
+    }
+
+    function updatePipeline(pipeline) {
+        if (!pipeline) return;
+
+        const status = $('pipelineStatus');
+        if (pipeline.running) {
+            status.textContent = 'RUNNING';
+            status.style.color = 'var(--success)';
+        } else {
+            status.textContent = 'OFFLINE';
+            status.style.color = 'var(--text-muted)';
+        }
+    }
+
+    function updateFooter(data) {
+        $('sseCount').textContent = sseCount.toLocaleString();
+        $('lastUpdate').textContent = new Date().toLocaleTimeString();
+
+        if (data.pipeline?.uptime) {
+            $('uptimeValue').textContent = formatDuration(data.pipeline.uptime);
+        }
+    }
+
+    // ─── Skeleton Drawing ─────────────────────────────────────────────────────
+    function drawSkeleton(keypoints) {
+        const canvas = $('skeletonCanvas');
+        const ctx = canvas.getContext('2d');
+        const rect = canvas.getBoundingClientRect();
+
+        canvas.width = rect.width * window.devicePixelRatio;
+        canvas.height = rect.height * window.devicePixelRatio;
+        ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+        const w = rect.width;
+        const h = rect.height;
+
+        ctx.clearRect(0, 0, w, h);
+
+        // Grid background
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.03)';
+        ctx.lineWidth = 1;
+        for (let x = 0; x < w; x += 30) {
+            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+        }
+        for (let y = 0; y < h; y += 30) {
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+        }
+
+        if (!keypoints || keypoints.length < 51) {
+            // No data — draw placeholder text
+            ctx.fillStyle = 'rgba(148, 163, 184, 0.3)';
+            ctx.font = '14px Inter, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('Waiting for pose data…', w / 2, h / 2);
+            return;
+        }
+
+        // Parse keypoints: [x0,y0,c0, x1,y1,c1, ...]
+        const points = [];
+        for (let i = 0; i < 17; i++) {
+            points.push({
+                x: keypoints[i * 3] * w,
+                y: keypoints[i * 3 + 1] * h,
+                c: keypoints[i * 3 + 2],
+            });
+        }
+
+        // Draw skeleton connections
+        ctx.lineWidth = 2.5;
+        for (const [a, b] of COCO_SKELETON) {
+            const pa = points[a], pb = points[b];
+            if (pa.c < 0.2 || pb.c < 0.2) continue;
+
+            const alpha = Math.min(pa.c, pb.c);
+            ctx.strokeStyle = getKeypointColor(a, alpha * 0.8);
+            ctx.beginPath();
+            ctx.moveTo(pa.x, pa.y);
+            ctx.lineTo(pb.x, pb.y);
+            ctx.stroke();
+        }
+
+        // Draw keypoints
+        for (let i = 0; i < 17; i++) {
+            const p = points[i];
+            if (p.c < 0.15) continue;
+
+            const radius = 4 + p.c * 3;
+            const color = getKeypointColor(i, p.c);
+
+            // Glow
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, radius + 4, 0, Math.PI * 2);
+            ctx.fillStyle = getKeypointColor(i, p.c * 0.2);
+            ctx.fill();
+
+            // Point
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+            ctx.fillStyle = color;
+            ctx.fill();
+
+            // Inner dot
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+            ctx.fillStyle = '#fff';
+            ctx.fill();
+        }
+    }
+
+    function getKeypointColor(idx, alpha) {
+        let base;
+        if (idx <= 4) base = [56, 189, 248];       // Head - sky blue
+        else if (idx <= 10) base = [167, 139, 250]; // Arms - purple
+        else base = [251, 191, 36];                 // Legs - amber
+        return `rgba(${base[0]}, ${base[1]}, ${base[2]}, ${alpha})`;
+    }
+
+    // ─── Sparkline Drawing ────────────────────────────────────────────────────
+    function drawSparkline(canvas, data, color, maxVal) {
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const rect = canvas.getBoundingClientRect();
+
+        canvas.width = rect.width * window.devicePixelRatio;
+        canvas.height = rect.height * window.devicePixelRatio;
+        ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+        const w = rect.width;
+        const h = rect.height;
+        const pad = 2;
+
+        ctx.clearRect(0, 0, w, h);
+
+        if (data.length < 2) return;
+
+        const step = (w - pad * 2) / (data.length - 1);
+        const scale = (h - pad * 2) / maxVal;
+
+        // Fill
+        ctx.beginPath();
+        ctx.moveTo(pad, h - pad);
+        data.forEach((v, i) => {
+            ctx.lineTo(pad + i * step, h - pad - Math.min(v, maxVal) * scale);
+        });
+        ctx.lineTo(pad + (data.length - 1) * step, h - pad);
+        ctx.closePath();
+
+        const grad = ctx.createLinearGradient(0, 0, 0, h);
+        grad.addColorStop(0, color.replace(')', ', 0.15)').replace('rgb', 'rgba'));
+        grad.addColorStop(1, 'transparent');
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        // Line
+        ctx.beginPath();
+        data.forEach((v, i) => {
+            const x = pad + i * step;
+            const y = h - pad - Math.min(v, maxVal) * scale;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Latest value dot
+        if (data.length > 0) {
+            const lastX = pad + (data.length - 1) * step;
+            const lastY = h - pad - Math.min(data[data.length - 1], maxVal) * scale;
+            ctx.beginPath();
+            ctx.arc(lastX, lastY, 3, 0, Math.PI * 2);
+            ctx.fillStyle = color;
+            ctx.fill();
+        }
+    }
+
+    // ─── Gauge Helper ─────────────────────────────────────────────────────────
+    function setGauge(el, value, max) {
+        const pct = Math.min(value / max, 1);
+        const offset = GAUGE_CIRCUMFERENCE * (1 - pct);
+        el.style.strokeDashoffset = offset;
+    }
+
+    // ─── Utility Functions ────────────────────────────────────────────────────
+    function formatBytes(bytes) {
+        if (bytes === 0) return '0 B';
+        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(1024));
+        return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i];
+    }
+
+    function formatTime(ts) {
+        if (!ts) return '—';
+        const d = new Date(ts * 1000);
+        return d.toLocaleTimeString();
+    }
+
+    function formatDuration(seconds) {
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = Math.floor(seconds % 60);
+        if (h > 0) return `${h}h ${m}m ${s}s`;
+        if (m > 0) return `${m}m ${s}s`;
+        return `${s}s`;
+    }
+
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    // ─── Clock ────────────────────────────────────────────────────────────────
+    function updateClock() {
+        $('clock').textContent = new Date().toLocaleTimeString();
+    }
+
+    // ─── Alert Clear ──────────────────────────────────────────────────────────
+    window.clearAlerts = function() {
+        fetch('/api/alerts/clear', { method: 'POST' })
+            .then(() => {
+                $('alertFeed').innerHTML = '<div class="alert-empty">Alerts cleared</div>';
+            })
+            .catch(console.error);
+    };
+
+    // ─── Initialize ───────────────────────────────────────────────────────────
+    function init() {
+        updateClock();
+        setInterval(updateClock, 1000);
+        connectSSE();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+})();
+</script>
+</body>
+</html>
