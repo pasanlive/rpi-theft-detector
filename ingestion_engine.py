@@ -423,15 +423,30 @@ class IngestionEngine:
                         caps = sample.get_caps()
                         if caps and caps.get_size() > 0:
                             st = caps.get_structure(0)
-                            if st.has_field("width"):
-                                curr_w = st.get_value("width")
-                            if st.has_field("height"):
-                                curr_h = st.get_value("height")
+                            res_w, val_w = st.get_int("width")
+                            res_h, val_h = st.get_int("height")
+                            if res_w and val_w > 0:
+                                curr_w = val_w
+                            if res_h and val_h > 0:
+                                curr_h = val_h
                     except Exception:
                         pass
 
-                    expected_len = curr_h * curr_w * 3
                     actual_len = len(map_info.data)
+                    expected_len = curr_h * curr_w * 3
+
+                    # Auto-derive dimensions if mismatch detected (e.g. 640x640 NPU buffer)
+                    if actual_len != expected_len:
+                        if actual_len == 640 * 640 * 3:
+                            curr_w, curr_h = 640, 640
+                            expected_len = actual_len
+                        elif actual_len == 640 * 480 * 3:
+                            curr_w, curr_h = 640, 480
+                            expected_len = actual_len
+                        elif actual_len % (curr_w * 3) == 0:
+                            curr_h = actual_len // (curr_w * 3)
+                            expected_len = actual_len
+
                     if actual_len != expected_len:
                         logger.warning(
                             "Buffer length mismatch: expected %d (%dx%dx3), got %d bytes",
