@@ -24,6 +24,23 @@ from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
+
+COCO_SKELETON_PAIRS = [
+    (0, 1), (0, 2), (1, 3), (2, 4),        # Head
+    (5, 6),                                  # Shoulders
+    (5, 7), (7, 9),                          # Left arm
+    (6, 8), (8, 10),                         # Right arm
+    (5, 11), (6, 12),                        # Torso
+    (11, 12),                                # Hips
+    (11, 13), (13, 15),                      # Left leg
+    (12, 14), (14, 16),                      # Right leg
+]
+
 if TYPE_CHECKING:
     from thread_manager import ThreadBridge
 
@@ -152,10 +169,6 @@ class IngestionEngine:
                 break
         logger.info("Using H.264 decoder element: %s", decoder_elem)
 
-        # Check for overlay and jpeg encoder elements
-        overlay_elem = "! hailooverlay " if Gst.ElementFactory.find("hailooverlay") is not None else ""
-        jpeg_elem = "! videoconvert ! jpegenc quality=80 " if Gst.ElementFactory.find("jpegenc") is not None else ""
-
         pipeline_str = (
             f"rtspsrc name=src location={self._rtsp_uri} "
             f"  latency={GST_RTSP_LATENCY_MS} "
@@ -165,15 +178,13 @@ class IngestionEngine:
             f"! h264parse "
             f"! {decoder_elem} "
             f"! videoconvert "
-            f"! video/x-raw,format=RGB "
+            f"! video/x-raw,format=RGB,width={self._frame_width},height={self._frame_height} "
             f"! queue max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
             f"! hailonet hef-path={self._hef_path} batch-size=1 "
             f"  scheduling-algorithm=0 force-writable=true "
             f"! queue max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
             f"! hailofilter so-path={HAILO_POST_SO} qos=false "
-            f"{overlay_elem}"
             f"! queue max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
-            f"{jpeg_elem}"
             f"! appsink name=sink emit-signals=true max-buffers=1 drop=true sync=false"
         )
 
@@ -319,74 +330,105 @@ class IngestionEngine:
             except Exception:
                 pass
 
+        best_detection = None
+        points = None
+        bbox = None
+
         try:
-            # Step 1: Extract Hailo ROI metadata — NO image buffer access
+            # Step 1: Extract Hailo ROI metadata
             roi = hailo.get_roi_from_buffer(buffer)
-            if roi is None:
-                return Gst.FlowReturn.OK
+            if roi is not None:
+                # Step 2: Get all person detections
+                detections = roi.get_objects_typed(hailo.HAILO_DETECTION)
+                best_confidence = 0.0
+                for det in detections:
+                    label = det.get_label().lower() if det.get_label() else ""
+                    has_landmarks = len(det.get_objects_typed(hailo.HAILO_LANDMARKS)) > 0
+                    is_person_det = (label == "person" or det.get_class_id() == 0 or has_landmarks or not label)
+                    
+                    if (is_person_det
+                            and det.get_confidence() >= DETECTION_CONFIDENCE_MIN
+                            and det.get_confidence() > best_confidence):
+                        best_detection = det
+                        best_confidence = det.get_confidence()
 
-            # Step 2: Get all person detections
-            detections = roi.get_objects_typed(hailo.HAILO_DETECTION)
-            if not detections:
-                return Gst.FlowReturn.OK
+                if best_detection is not None:
+                    landmarks_list = best_detection.get_objects_typed(hailo.HAILO_LANDMARKS)
+                    if landmarks_list:
+                        pts_candidate = landmarks_list[0].get_points()
+                        if len(pts_candidate) >= NUM_KEYPOINTS:
+                            points = pts_candidate
+                            bbox = best_detection.get_bbox()
 
-            # Step 3: Select highest-confidence person detection
-            best_detection = None
-            best_confidence = 0.0
-            for det in detections:
-                label = det.get_label().lower() if det.get_label() else ""
-                has_landmarks = len(det.get_objects_typed(hailo.HAILO_LANDMARKS)) > 0
-                is_person_det = (label == "person" or det.get_class_id() == 0 or has_landmarks or not label)
-                
-                if (is_person_det
-                        and det.get_confidence() >= DETECTION_CONFIDENCE_MIN
-                        and det.get_confidence() > best_confidence):
-                    best_detection = det
-                    best_confidence = det.get_confidence()
+                            # Pack 51-dim vector for BiLSTM
+                            vector = np.empty(FEATURE_DIM, dtype=np.float32)
+                            for i in range(NUM_KEYPOINTS):
+                                pt = points[i]
+                                abs_x = pt.x() * bbox.width() + bbox.xmin()
+                                abs_y = pt.y() * bbox.height() + bbox.ymin()
+                                vector[i * KEYPOINT_DIM] = abs_x
+                                vector[i * KEYPOINT_DIM + 1] = abs_y
+                                vector[i * KEYPOINT_DIM + 2] = pt.confidence()
 
-            if best_detection is None:
-                return Gst.FlowReturn.OK
-
-            # Step 4: Extract landmarks from best detection
-            landmarks_list = best_detection.get_objects_typed(
-                hailo.HAILO_LANDMARKS
-            )
-            if not landmarks_list:
-                return Gst.FlowReturn.OK
-
-            points = landmarks_list[0].get_points()
-            if len(points) < NUM_KEYPOINTS:
-                logger.debug(
-                    "Incomplete landmarks: got %d, expected %d",
-                    len(points), NUM_KEYPOINTS,
-                )
-                return Gst.FlowReturn.OK
-
-            # Step 5: Pack into 51-dim vector
-            # Coordinates are bbox-relative normalized [0,1].
-            # Convert to absolute frame-normalized coordinates so the
-            # LSTM receives position-invariant features.
-            bbox = best_detection.get_bbox()
-            vector = np.empty(FEATURE_DIM, dtype=np.float32)
-
-            for i in range(NUM_KEYPOINTS):
-                pt = points[i]
-                # Convert bbox-relative → frame-relative [0, 1]
-                abs_x = pt.x() * bbox.width() + bbox.xmin()
-                abs_y = pt.y() * bbox.height() + bbox.ymin()
-                vector[i * KEYPOINT_DIM] = abs_x
-                vector[i * KEYPOINT_DIM + 1] = abs_y
-                vector[i * KEYPOINT_DIM + 2] = pt.confidence()
-
-            # Step 6: Push into the lock-free bridge (non-blocking)
-            self._bridge.push(vector)
+                            self._bridge.push(vector)
 
         except Exception:
-            # Never let an exception propagate back into GStreamer —
-            # it would crash the entire pipeline.
-            logger.exception("Error in appsink callback")
+            logger.exception("Error extracting Hailo metadata in appsink callback")
+
+        # Step 3: Send video frame to dashboard if enabled
+        if self._dash_bridge is not None and CV2_AVAILABLE:
+            try:
+                success, map_info = buffer.map(Gst.MapFlags.READ)
+                if success:
+                    # Convert raw RGB buffer bytes to numpy array
+                    rgb = np.frombuffer(map_info.data, dtype=np.uint8).reshape(
+                        (self._frame_height, self._frame_width, 3)
+                    )
+                    frame_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+
+                    # Draw pose & bbox overlay if person detected
+                    if bbox is not None and points is not None:
+                        self._draw_pose_overlay(frame_bgr, bbox, points)
+
+                    # Compress frame to JPEG and push to dashboard bridge
+                    _, jpeg_buf = cv2.imencode(".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                    self._dash_bridge.push_jpeg_frame(jpeg_buf.tobytes())
+                    buffer.unmap(map_info)
+            except Exception as exc:
+                logger.debug("Dashboard frame encoding error: %s", exc)
 
         return Gst.FlowReturn.OK
+
+    def _draw_pose_overlay(self, frame: np.ndarray, bbox: Any, points: Any) -> None:
+        """Draw bounding box and 17 COCO pose keypoints on OpenCV BGR frame."""
+        h, w, _ = frame.shape
+
+        # Bounding box
+        xmin = int(bbox.xmin() * w)
+        ymin = int(bbox.ymin() * h)
+        xmax = int((bbox.xmin() + bbox.width()) * w)
+        ymax = int((bbox.ymin() + bbox.height()) * h)
+        cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), (248, 189, 56), 2)
+
+        # Points
+        pts = []
+        for pt in points:
+            px = int((pt.x() * bbox.width() + bbox.xmin()) * w)
+            py = int((pt.y() * bbox.height() + bbox.ymin()) * h)
+            pts.append((px, py, pt.confidence()))
+
+        # Skeleton lines
+        for p1, p2 in COCO_SKELETON_PAIRS:
+            if p1 < len(pts) and p2 < len(pts):
+                x1, y1, c1 = pts[p1]
+                x2, y2, c2 = pts[p2]
+                if c1 >= 0.35 and c2 >= 0.35:
+                    cv2.line(frame, (x1, y1), (x2, y2), (250, 139, 167), 2)
+
+        # Keypoint circles
+        for px, py, c in pts:
+            if c >= 0.35:
+                cv2.circle(frame, (px, py), 4, (52, 211, 153), -1)
 
     # ─── Bus Message Handlers ──────────────────────────────────────────────
 
