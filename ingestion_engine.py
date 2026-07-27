@@ -151,11 +151,11 @@ class IngestionEngine:
         logger.info("Using H.264 decoder element: %s", decoder_elem)
 
         pipeline_str = (
-            f"rtspsrc location={self._rtsp_uri} "
+            f"rtspsrc name=src location={self._rtsp_uri} "
             f"  latency={GST_RTSP_LATENCY_MS} "
             f"  drop-on-latency=true "
             f"  protocols=tcp "
-            f"! rtph264depay "
+            f"rtph264depay name=depay "
             f"! h264parse "
             f"! {decoder_elem} "
             f"! videoconvert "
@@ -175,6 +175,11 @@ class IngestionEngine:
         if self._pipeline is None:
             raise RuntimeError("Failed to parse GStreamer pipeline string.")
 
+        # Connect dynamic pad-added signal for RTSP source
+        rtspsrc_elem = self._pipeline.get_by_name("src")
+        if rtspsrc_elem is not None:
+            rtspsrc_elem.connect("pad-added", self._on_rtspsrc_pad_added)
+
         # Connect appsink callback
         appsink = self._pipeline.get_by_name("sink")
         if appsink is None:
@@ -189,6 +194,33 @@ class IngestionEngine:
         bus.connect("message::warning", self._on_bus_warning)
 
         logger.info("GStreamer pipeline built successfully.")
+
+    def _on_rtspsrc_pad_added(self, rtspsrc: Gst.Element, pad: Gst.Pad) -> None:
+        """Dynamically link RTSP video pad to depayloader.
+
+        RTSP streams create pads dynamically for video and audio media tracks.
+        This handler selectively links the video pad to the depayloader and
+        ignores unhandled tracks (e.g. audio), preventing 'not-linked' errors.
+        """
+        if self._pipeline is None:
+            return
+        depay = self._pipeline.get_by_name("depay")
+        if depay is None:
+            return
+        sink_pad = depay.get_static_pad("sink")
+        if sink_pad is None or sink_pad.is_linked():
+            return
+
+        caps = pad.query_caps(None)
+        if caps and caps.get_size() > 0:
+            struct_name = caps.get_structure(0).get_name()
+            # Match RTP H.264 video payload caps
+            if "video" in struct_name or "rtp" in struct_name:
+                res = pad.link(sink_pad)
+                if res == Gst.PadLinkReturn.OK:
+                    logger.info("Successfully linked dynamic RTSP video pad to depayloader.")
+                else:
+                    logger.warning("Failed to link RTSP pad: %s", res)
 
     def start(self) -> None:
         """Start the pipeline and enter the GLib main loop.
