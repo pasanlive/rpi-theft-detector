@@ -124,7 +124,7 @@ def main() -> int:
     # ── Phase 1: GStreamer Ingestion ───────────────────────────────────────
     from ingestion_engine import IngestionEngine
 
-    engine = IngestionEngine(bridge=bridge)
+    engine = IngestionEngine(bridge=bridge, dash_bridge=dash_bridge)
 
     # ── Signal Handlers for Graceful Shutdown ──────────────────────────────
     def _shutdown_handler(signum: int, frame: object) -> None:

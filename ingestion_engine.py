@@ -91,6 +91,7 @@ class IngestionEngine:
         bridge: ThreadBridge,
         rtsp_uri: str = RTSP_URI,
         hef_path: str = HEF_MODEL_PATH,
+        dash_bridge: Optional[Any] = None,
     ) -> None:
         if not GST_AVAILABLE:
             raise RuntimeError(
@@ -104,6 +105,7 @@ class IngestionEngine:
             )
 
         self._bridge = bridge
+        self._dash_bridge = dash_bridge
         self._rtsp_uri = rtsp_uri
         self._hef_path = hef_path
         self._pipeline: Optional[Gst.Pipeline] = None
@@ -150,6 +152,10 @@ class IngestionEngine:
                 break
         logger.info("Using H.264 decoder element: %s", decoder_elem)
 
+        # Check for overlay and jpeg encoder elements
+        overlay_elem = "! hailooverlay " if Gst.ElementFactory.find("hailooverlay") is not None else ""
+        jpeg_elem = "! videoconvert ! jpegenc quality=80 " if Gst.ElementFactory.find("jpegenc") is not None else ""
+
         pipeline_str = (
             f"rtspsrc name=src location={self._rtsp_uri} "
             f"  latency={GST_RTSP_LATENCY_MS} "
@@ -165,7 +171,9 @@ class IngestionEngine:
             f"  scheduling-algorithm=0 force-writable=true "
             f"! queue max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
             f"! hailofilter so-path={HAILO_POST_SO} qos=false "
+            f"{overlay_elem}"
             f"! queue max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
+            f"{jpeg_elem}"
             f"! appsink name=sink emit-signals=true max-buffers=1 drop=true sync=false"
         )
 
@@ -300,6 +308,16 @@ class IngestionEngine:
         buffer = sample.get_buffer()
         if buffer is None:
             return Gst.FlowReturn.OK
+
+        # Extract JPEG frame bytes for dashboard live video stream if enabled
+        if self._dash_bridge is not None:
+            try:
+                success, map_info = buffer.map(Gst.MapFlags.READ)
+                if success:
+                    self._dash_bridge.push_jpeg_frame(bytes(map_info.data))
+                    buffer.unmap(map_info)
+            except Exception:
+                pass
 
         try:
             # Step 1: Extract Hailo ROI metadata — NO image buffer access

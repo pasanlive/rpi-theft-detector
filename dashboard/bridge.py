@@ -52,12 +52,25 @@ class DashboardBridge:
         # Alert history (newest first for the dashboard feed)
         self._alerts: deque[dict[str, Any]] = deque(maxlen=200)
 
+        # Latest video frame (JPEG bytes) for live MJPEG stream
+        self._latest_jpeg: Optional[bytes] = None
+
         # Pipeline status
         self._pipeline_running = False
 
         logger.info("DashboardBridge initialized.")
 
     # ─── Producer Methods (called from pipeline threads) ───────────────────
+
+    def push_jpeg_frame(self, jpeg_bytes: bytes) -> None:
+        """Record the latest JPEG encoded video frame."""
+        with self._lock:
+            self._latest_jpeg = jpeg_bytes
+
+    def get_latest_jpeg(self) -> Optional[bytes]:
+        """Retrieve the latest JPEG encoded video frame."""
+        with self._lock:
+            return self._latest_jpeg
 
     def push_inference(self, label: str, confidence: float) -> None:
         """Record a new classification result from the BiLSTM consumer.

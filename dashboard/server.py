@@ -107,6 +107,24 @@ def create_app(
             mimetype="application/json",
         )
 
+    @app.route("/api/video_feed")
+    def video_feed() -> Response:
+        """Multipart MJPEG video stream endpoint for live video feed on dashboard."""
+        def generate():
+            while True:
+                jpeg = bridge.get_latest_jpeg()
+                if jpeg is not None:
+                    yield (
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n"
+                    )
+                time.sleep(0.05)  # ~20 FPS
+
+        return Response(
+            generate(),
+            mimetype="multipart/x-mixed-replace; boundary=frame",
+        )
+
     return app
 
 

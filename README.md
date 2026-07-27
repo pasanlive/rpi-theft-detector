@@ -121,11 +121,17 @@ hailomz compile yolov8s_pose --target hailo8 --output models/yolov8s_pose.hef
 ```
 rpi-theft-detector/
 ├── config.py               # Centralized constants (RTSP URL, model paths, tuning)
-├── ingestion_engine.py     # GStreamer pipeline + Hailo metadata extraction
+├── ingestion_engine.py     # GStreamer pipeline + Hailo metadata & video stream
 ├── thread_manager.py       # Lock-free deque bridge + consumer thread
 ├── action_classifier.py    # BiLSTM model + LOCF data cleaning
 ├── alert_handler.py        # File logging + webhook notifications
-├── main.py                 # Entrypoint — orchestrates all stages
+├── dashboard/              # Real-time Web Monitoring Dashboard
+│   ├── bridge.py           # Thread-safe state container & MJPEG frame buffer
+│   ├── metrics.py          # System metrics collector (CPU, RAM, temp, disk)
+│   ├── server.py           # Flask server (SSE stream + MJPEG /api/video_feed)
+│   └── static/
+│       └── index.html      # Single-page Glassmorphism UI
+├── main.py                 # Entrypoint — orchestrates pipeline & dashboard
 ├── verify_architecture.py  # 19 unit tests (runs without hardware)
 ├── requirements.txt        # pip dependencies
 ├── models/
