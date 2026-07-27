@@ -31,7 +31,12 @@ import os
 import signal
 import sys
 
-from config import INFERENCE_INTERVAL_SEC, MODEL_WEIGHTS_PATH, CAMERA_SOURCE
+from config import (
+    INFERENCE_INTERVAL_SEC,
+    MODEL_WEIGHTS_PATH,
+    CAMERA_SOURCE,
+    ENABLE_VIDEO_FEED,
+)
 
 # ─── Logging Setup ─────────────────────────────────────────────────────────────
 
