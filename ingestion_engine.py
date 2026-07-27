@@ -146,10 +146,18 @@ class IngestionEngine:
     def build_pipeline(self) -> None:
         """Construct and link the GStreamer pipeline for Pi Cam 2, RTSP, or V4L2."""
         if self._camera_source in ["picam", "libcamerasrc", "camera"]:
-            logger.info("Configuring pipeline for Raspberry Pi Camera Module 2 (libcamerasrc)...")
+            if Gst.ElementFactory.find("libcamerasrc") is not None:
+                logger.info("Configuring pipeline for Raspberry Pi Camera Module 2 (libcamerasrc)...")
+                src_elem = "libcamerasrc name=src ! video/x-raw, width=1280, height=720, format=NV12"
+            elif Gst.ElementFactory.find("v4l2src") is not None:
+                logger.info("libcamerasrc not found — falling back to v4l2src (/dev/video0) for Pi Camera...")
+                src_elem = "v4l2src name=src device=/dev/video0"
+            else:
+                logger.info("libcamerasrc and v4l2src not found — using autovideosrc...")
+                src_elem = "autovideosrc name=src"
+
             pipeline_str = (
-                "libcamerasrc name=src "
-                "! video/x-raw, width=1280, height=720, format=NV12 "
+                f"{src_elem} "
                 "! videoconvert "
                 "! videoscale "
                 "! video/x-raw, width=640, height=640, format=RGB "
