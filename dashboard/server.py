@@ -35,6 +35,38 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
+def _make_placeholder_jpeg() -> bytes:
+    """Generate a clean dark placeholder JPEG image."""
+    try:
+        import cv2
+        import numpy as np
+        img = np.zeros((480, 640, 3), dtype=np.uint8)
+        img[:] = (33, 16, 11)  # Dark slate background
+        cv2.putText(
+            img, "RTSP CAMERA CONNECTING...", (130, 230),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (248, 189, 56), 2
+        )
+        cv2.putText(
+            img, "Waiting for stream video frames...", (145, 270),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (148, 163, 184), 1
+        )
+        _, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        return buf.tobytes()
+    except Exception:
+        return (
+            b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+            b"\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c"
+            b"\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c"
+            b"\x1c $.' \x1c\x1c(7(-./3131#&2821.3111\xff\xc0\x00\x0b\x08\x00\x01"
+            b"\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01"
+            b"\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06"
+            b"\x07\x08\t\n\x0b\xff\xda\x00\x08\x01\x01\x00\x00?\x00\xbf\x00\xff\xd9"
+        )
+
+
+PLACEHOLDER_JPEG = _make_placeholder_jpeg()
+
+
 def create_app(
     bridge: DashboardBridge,
     metrics: Optional[MetricsCollector] = None,
@@ -113,16 +145,24 @@ def create_app(
         def generate():
             while True:
                 jpeg = bridge.get_latest_jpeg()
-                if jpeg is not None:
-                    yield (
-                        b"--frame\r\n"
-                        b"Content-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n"
-                    )
+                if jpeg is None:
+                    jpeg = PLACEHOLDER_JPEG
+
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n"
+                )
                 time.sleep(0.05)  # ~20 FPS
 
         return Response(
             generate(),
             mimetype="multipart/x-mixed-replace; boundary=frame",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+                "X-Accel-Buffering": "no",
+            },
         )
 
     return app
