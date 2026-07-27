@@ -157,13 +157,13 @@ class IngestionEngine:
         and are routed to a ``fakesink`` via the ``pad-added`` handler.
 
         Design Notes:
-        - Three ``queue`` elements with ``leaky=downstream`` create backpressure
-          relief points. Under CPU load, oldest frames are silently dropped.
-        - ``appsink max-buffers=1 drop=true`` ensures only the freshest frame
-          is processed, preventing metadata lag.
-        - ``sync=false`` disables clock synchronization — process ASAP.
+        - `rtspsrc` creates dynamic pads at runtime. `_on_rtspsrc_pad_added`
+          explicitly routes video pads to `video_in` queue and audio pads to `fakesink`.
+        - `queue name=video_in` decouples RTSP network socket reading from video
+          decoding and NPU inference, preventing RTSP timeouts under load.
+        - `appsink max-buffers=1 drop=true sync=false` ensures lowest latency.
         """
-        # Auto-detect best available H.265 decoder
+        # Auto-detect best available H.265 decoder element
         decoder_elem = self._find_decoder("h265")
         logger.info("Using H.265 decoder element: %s", decoder_elem)
 
@@ -171,7 +171,7 @@ class IngestionEngine:
             f'rtspsrc name=src location="{self._rtsp_uri}" '
             f"  latency={GST_RTSP_LATENCY_MS} "
             f"  drop-on-latency=true "
-            f"  protocols=tcp "
+            f"! queue name=video_in max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
             f"! rtph265depay "
             f"! h265parse "
             f"! {decoder_elem} "
@@ -192,7 +192,7 @@ class IngestionEngine:
         if self._pipeline is None:
             raise RuntimeError("Failed to parse GStreamer pipeline string.")
 
-        # Connect pad-added handler for audio → fakesink routing
+        # Connect pad-added handler for dynamic video and audio routing
         rtspsrc_elem = self._pipeline.get_by_name("src")
         if rtspsrc_elem is not None:
             rtspsrc_elem.connect("pad-added", self._on_rtspsrc_pad_added)
@@ -246,13 +246,7 @@ class IngestionEngine:
         logger.info("rtspsrc: no-more-pads — all RTSP stream pads have been created.")
 
     def _on_rtspsrc_pad_added(self, rtspsrc: Gst.Element, pad: Gst.Pad) -> None:
-        """Route audio pads to fakesink; video is auto-linked by gst_parse_launch.
-
-        When ``!`` is used between ``rtspsrc`` and ``rtph265depay`` in the
-        pipeline string, GStreamer internally handles linking video pads
-        whose caps match the depayloader. Audio pads don't match and must
-        be explicitly routed to a ``fakesink`` to prevent 'not-linked' errors.
-        """
+        """Route dynamic RTSP pads: video → video_in queue, audio → fakesink."""
         caps = pad.query_caps(None)
         caps_str = caps.to_string().lower() if caps is not None else ""
         logger.info("rtspsrc pad-added: pad=%s caps=%s", pad.get_name(), caps_str[:200])
@@ -266,13 +260,31 @@ class IngestionEngine:
             fakesink = Gst.ElementFactory.make("fakesink", None)
             if fakesink is not None:
                 fakesink.set_property("async", False)
+                fakesink.set_property("sync", False)
                 self._pipeline.add(fakesink)
                 fakesink.sync_state_with_parent()
-                pad.link(fakesink.get_static_pad("sink"))
+                sink_pad = fakesink.get_static_pad("sink")
+                if sink_pad:
+                    pad.link(sink_pad)
             return
 
-        # Video pads are auto-linked by gst_parse_launch's internal handler
-        logger.info("Video pad '%s' — auto-linking to rtph265depay (handled by GStreamer).", pad.get_name())
+        # Route video pads to video_in entry queue
+        video_in = self._pipeline.get_by_name("video_in")
+        if video_in is None:
+            logger.error("Could not find 'video_in' queue in pipeline!")
+            return
+
+        sink_pad = video_in.get_static_pad("sink")
+        if sink_pad is None:
+            logger.error("Could not get sink pad of 'video_in' queue!")
+            return
+
+        if sink_pad.is_linked():
+            logger.info("video_in sink pad is already linked, ignoring pad '%s'.", pad.get_name())
+            return
+
+        res = pad.link(sink_pad)
+        logger.info("Linked RTSP video pad '%s' → video_in queue (result: %s)", pad.get_name(), res)
 
     def start(self) -> None:
         """Start the pipeline and enter the GLib main loop.
@@ -354,8 +366,6 @@ class IngestionEngine:
             logger.info(">>> FIRST FRAME arrived at appsink — pipeline data flow confirmed!")
             logger.info("    dash_bridge=%s, CV2_AVAILABLE=%s", self._dash_bridge is not None, CV2_AVAILABLE)
 
-
-
         best_detection = None
         points = None
         bbox = None
@@ -406,36 +416,42 @@ class IngestionEngine:
             try:
                 success, map_info = buffer.map(Gst.MapFlags.READ)
                 if success:
-                    # Dynamically query dimensions from sample caps
                     curr_w, curr_h = self._frame_width, self._frame_height
                     try:
                         caps = sample.get_caps()
                         if caps and caps.get_size() > 0:
                             st = caps.get_structure(0)
-                            res_w, w_val = st.get_int("width")
-                            res_h, h_val = st.get_int("height")
-                            if res_w and res_h and w_val > 0 and h_val > 0:
-                                curr_w, curr_h = w_val, h_val
+                            if st.has_field("width"):
+                                curr_w = st.get_value("width")
+                            if st.has_field("height"):
+                                curr_h = st.get_value("height")
                     except Exception:
                         pass
 
-                    # Convert raw RGB buffer bytes to numpy array
-                    rgb = np.frombuffer(map_info.data, dtype=np.uint8).reshape(
-                        (curr_h, curr_w, 3)
-                    )
-                    frame_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+                    expected_len = curr_h * curr_w * 3
+                    actual_len = len(map_info.data)
+                    if actual_len != expected_len:
+                        logger.warning(
+                            "Buffer length mismatch: expected %d (%dx%dx3), got %d bytes",
+                            expected_len, curr_w, curr_h, actual_len
+                        )
+                    else:
+                        rgb = np.frombuffer(map_info.data, dtype=np.uint8).reshape(
+                            (curr_h, curr_w, 3)
+                        )
+                        frame_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
-                    # Draw pose & bbox overlay if person detected
-                    if bbox is not None and points is not None:
-                        self._draw_pose_overlay(frame_bgr, bbox, points)
+                        # Draw pose & bbox overlay if person detected
+                        if bbox is not None and points is not None:
+                            self._draw_pose_overlay(frame_bgr, bbox, points)
 
-                    # Compress frame to JPEG and push to dashboard bridge
-                    ret_val, jpeg_buf = cv2.imencode(".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
-                    if ret_val:
-                        self._dash_bridge.push_jpeg_frame(jpeg_buf.tobytes())
-                        self._sample_counter += 1
-                        if self._sample_counter == 1 or self._sample_counter % 50 == 0:
-                            logger.info("RTSP camera frame #%d pushed to live video feed.", self._sample_counter)
+                        # Compress frame to JPEG and push to dashboard bridge
+                        ret_val, jpeg_buf = cv2.imencode(".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                        if ret_val:
+                            self._dash_bridge.push_jpeg_frame(jpeg_buf.tobytes())
+                            self._sample_counter += 1
+                            if self._sample_counter == 1 or self._sample_counter % 50 == 0:
+                                logger.info("RTSP camera frame #%d pushed to live video feed.", self._sample_counter)
                     buffer.unmap(map_info)
             except Exception as exc:
                 logger.error("Dashboard frame encoding error: %s", exc, exc_info=True)
