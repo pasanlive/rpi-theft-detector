@@ -178,7 +178,7 @@ class IngestionEngine:
             f"! {decoder_elem} "
             f"! videoconvert "
             f"! videoscale "
-            f"! video/x-raw,format=RGB "
+            f"! video/x-raw, width=640, height=640, format=RGB "
             f"! queue max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
             f"! hailonet hef-path={self._hef_path} batch-size=1 "
             f"  scheduling-algorithm=0 force-writable=true "
