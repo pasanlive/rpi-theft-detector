@@ -57,6 +57,7 @@ INFERENCE_INTERVAL_SEC = 0.1   # 10 Hz BiLSTM polling rate
 DETECTION_CONFIDENCE_MIN = 0.35 # Minimum person detection confidence
 
 # ─── GStreamer Pipeline Tuning ───────────────────────────────────────────────
+ENABLE_VIDEO_FEED = os.environ.get("ENABLE_VIDEO_FEED", "false").lower() in ["true", "1", "yes"]
 GST_QUEUE_MAX_BUFFERS = 3
 GST_RTSP_LATENCY_MS = 100
 FRAME_WIDTH = 640              # Sub-stream resolution

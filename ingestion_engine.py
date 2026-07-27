@@ -83,6 +83,7 @@ from config import (
     GST_RTSP_LATENCY_MS,
     FRAME_WIDTH,
     FRAME_HEIGHT,
+    ENABLE_VIDEO_FEED,
 )
 
 
@@ -99,6 +100,9 @@ class IngestionEngine:
         RTSP camera URL. Defaults to ``config.RTSP_URI``.
     hef_path : str, optional
         Path to the compiled ``.hef`` model. Defaults to ``config.HEF_MODEL_PATH``.
+    enable_video_feed : bool, optional
+        Whether to map RGB frame buffers and encode JPEGs for dashboard video streaming.
+        Defaults to ``config.ENABLE_VIDEO_FEED`` (False for maximum performance).
 
     Raises
     ------
@@ -113,6 +117,7 @@ class IngestionEngine:
         rtsp_uri: str = RTSP_URI,
         hef_path: str = HEF_MODEL_PATH,
         dash_bridge: Optional[Any] = None,
+        enable_video_feed: bool = ENABLE_VIDEO_FEED,
     ) -> None:
         if not GST_AVAILABLE:
             raise RuntimeError(
@@ -130,6 +135,7 @@ class IngestionEngine:
         self._camera_source = camera_source.lower()
         self._rtsp_uri = rtsp_uri
         self._hef_path = hef_path
+        self._enable_video_feed = enable_video_feed
         self._pipeline: Optional[Gst.Pipeline] = None
         self._main_loop: Optional[GLib.MainLoop] = None
         self._frame_width = FRAME_WIDTH
@@ -138,9 +144,9 @@ class IngestionEngine:
 
         Gst.init(None)
         logger.info(
-            "IngestionEngine initialized — source=%s, RTSP=%s, HEF=%s, CV2=%s, dashboard=%s",
-            self._camera_source, self._rtsp_uri, self._hef_path,
-            CV2_AVAILABLE, self._dash_bridge is not None,
+            "IngestionEngine initialized — source=%s, video_feed=%s, RTSP=%s, HEF=%s, CV2=%s",
+            self._camera_source, self._enable_video_feed, self._rtsp_uri,
+            self._hef_path, CV2_AVAILABLE,
         )
 
     def build_pipeline(self) -> None:
@@ -434,8 +440,8 @@ class IngestionEngine:
         except Exception:
             logger.exception("Error extracting Hailo metadata in appsink callback")
 
-        # Step 3: Send video frame to dashboard if enabled
-        if self._dash_bridge is not None and CV2_AVAILABLE:
+        # Step 3: Send video frame to dashboard ONLY if video feed is explicitly enabled
+        if self._enable_video_feed and self._dash_bridge is not None and CV2_AVAILABLE:
             try:
                 success, map_info = buffer.map(Gst.MapFlags.READ)
                 if success:

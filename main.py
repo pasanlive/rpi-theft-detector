@@ -53,6 +53,7 @@ def main() -> int:
         Exit code: 0 on clean shutdown, 1 on error.
     """
     enable_dashboard = "--no-dashboard" not in sys.argv
+    enable_video_feed = "--enable-video" in sys.argv or ENABLE_VIDEO_FEED
     dashboard_port = int(os.environ.get("DASHBOARD_PORT", "5000"))
 
     # Determine camera source (CLI flag > ENV var > default)
@@ -67,6 +68,7 @@ def main() -> int:
     logger.info("═══════════════════════════════════════════════════════════")
     logger.info("  RPi5 Theft Detector — Zero-Copy Video Analytics Pipeline")
     logger.info("  Camera Source: %s", camera_source.upper())
+    logger.info("  Video Stream : %s", "ENABLED" if enable_video_feed else "DISABLED (High Performance Mode)")
     logger.info("═══════════════════════════════════════════════════════════")
 
     # ── Phase 2: Thread Bridge ─────────────────────────────────────────────
@@ -135,6 +137,7 @@ def main() -> int:
         bridge=bridge,
         camera_source=camera_source,
         dash_bridge=dash_bridge,
+        enable_video_feed=enable_video_feed,
     )
 
     # ── Signal Handlers for Graceful Shutdown ──────────────────────────────

@@ -43,12 +43,16 @@ def _make_placeholder_jpeg() -> bytes:
         img = np.zeros((480, 640, 3), dtype=np.uint8)
         img[:] = (33, 16, 11)  # Dark slate background
         cv2.putText(
-            img, "RTSP CAMERA CONNECTING...", (130, 230),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (248, 189, 56), 2
+            img, "HIGH-PERFORMANCE MODE ENABLED", (80, 220),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (52, 211, 153), 2
         )
         cv2.putText(
-            img, "Waiting for stream video frames...", (145, 270),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (148, 163, 184), 1
+            img, "Video feed disabled for max NPU inference FPS & zero latency", (50, 260),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (148, 163, 184), 1
+        )
+        cv2.putText(
+            img, "Pass --enable-video to re-enable live MJPEG feed", (110, 300),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (248, 189, 56), 1
         )
         _, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 70])
         return buf.tobytes()
