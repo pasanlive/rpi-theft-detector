@@ -320,15 +320,7 @@ class IngestionEngine:
         if buffer is None:
             return Gst.FlowReturn.OK
 
-        # Extract JPEG frame bytes for dashboard live video stream if enabled
-        if self._dash_bridge is not None:
-            try:
-                success, map_info = buffer.map(Gst.MapFlags.READ)
-                if success:
-                    self._dash_bridge.push_jpeg_frame(bytes(map_info.data))
-                    buffer.unmap(map_info)
-            except Exception:
-                pass
+
 
         best_detection = None
         points = None
@@ -404,11 +396,12 @@ class IngestionEngine:
                         self._draw_pose_overlay(frame_bgr, bbox, points)
 
                     # Compress frame to JPEG and push to dashboard bridge
-                    _, jpeg_buf = cv2.imencode(".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
-                    self._dash_bridge.push_jpeg_frame(jpeg_buf.tobytes())
+                    ret_val, jpeg_buf = cv2.imencode(".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                    if ret_val:
+                        self._dash_bridge.push_jpeg_frame(jpeg_buf.tobytes())
                     buffer.unmap(map_info)
             except Exception as exc:
-                logger.debug("Dashboard frame encoding error: %s", exc)
+                logger.error("Dashboard frame encoding error: %s", exc, exc_info=True)
 
         return Gst.FlowReturn.OK
 
