@@ -169,11 +169,12 @@ class IngestionEngine:
 
         pipeline_str = (
             f'rtspsrc name=src location="{self._rtsp_uri}" '
-            f"  latency={GST_RTSP_LATENCY_MS} "
+            f"  latency=200 "
             f"  drop-on-latency=true "
+            f"  protocols=tcp "
             f"! queue name=video_in max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
             f"! rtph265depay "
-            f"! h265parse "
+            f"! h265parse config-interval=-1 "
             f"! {decoder_elem} "
             f"! videoconvert "
             f"! video/x-raw,format=RGB "
