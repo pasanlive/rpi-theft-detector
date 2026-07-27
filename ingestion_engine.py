@@ -178,7 +178,7 @@ class IngestionEngine:
             f"! h264parse "
             f"! {decoder_elem} "
             f"! videoconvert "
-            f"! video/x-raw,format=RGB,width={self._frame_width},height={self._frame_height} "
+            f"! video/x-raw,format=RGB "
             f"! queue max-size-buffers={GST_QUEUE_MAX_BUFFERS} leaky=downstream "
             f"! hailonet hef-path={self._hef_path} batch-size=1 "
             f"  scheduling-algorithm=0 force-writable=true "
@@ -380,9 +380,22 @@ class IngestionEngine:
             try:
                 success, map_info = buffer.map(Gst.MapFlags.READ)
                 if success:
+                    # Dynamically query dimensions from sample caps
+                    curr_w, curr_h = self._frame_width, self._frame_height
+                    try:
+                        caps = sample.get_caps()
+                        if caps and caps.get_size() > 0:
+                            st = caps.get_structure(0)
+                            res_w, w_val = st.get_int("width")
+                            res_h, h_val = st.get_int("height")
+                            if res_w and res_h and w_val > 0 and h_val > 0:
+                                curr_w, curr_h = w_val, h_val
+                    except Exception:
+                        pass
+
                     # Convert raw RGB buffer bytes to numpy array
                     rgb = np.frombuffer(map_info.data, dtype=np.uint8).reshape(
-                        (self._frame_height, self._frame_width, 3)
+                        (curr_h, curr_w, 3)
                     )
                     frame_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
